@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2023 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+variable "admin_principal" {
+  description = "User or group that is assigned roles, in IAM format (`group:foo@example.com`)."
+  type        = string
+  default     = null
+}
 
 # Documentation: https://cloud.google.com/run/docs/securing/managing-access#making_a_service_public
 variable "cloud_run_invoker" {
@@ -39,6 +45,13 @@ variable "create_connector" {
   default     = true
 }
 
+variable "deletion_protection" {
+  description = "Prevent Terraform from destroying data storage resources (storage buckets, GKE clusters, CloudSQL instances) in this blueprint. When this field is set in Terraform state, a terraform destroy or terraform apply that would delete data storage resources will fail."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 # PSA: documentation: https://cloud.google.com/vpc/docs/configure-private-services-access#allocating-range
 variable "ip_ranges" {
   description = "CIDR blocks: VPC serverless connector, Private Service Access(PSA) for CloudSQL, CloudSQL VPC."
@@ -61,12 +74,6 @@ variable "prefix" {
     condition     = var.prefix != ""
     error_message = "Prefix cannot be empty."
   }
-}
-
-variable "principals" {
-  description = "List of users to give rights to (CloudSQL admin, client and instanceUser, Logging admin, Service Account User and TokenCreator), eg 'user@domain.com'."
-  type        = list(string)
-  default     = []
 }
 
 variable "project_create" {

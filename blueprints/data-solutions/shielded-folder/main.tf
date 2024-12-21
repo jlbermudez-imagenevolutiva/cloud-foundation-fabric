@@ -1,4 +1,4 @@
-# Copyright 2023 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ locals {
         identities    = values(module.folder.sink_writer_identities)
       }
       to = {
-        resources  = ["projects/${module.log-export-project.0.number}"]
+        resources  = ["projects/${module.log-export-project[0].number}"]
         operations = [{ service_name = "*" }]
     } }
   } : null
@@ -47,8 +47,8 @@ locals {
   groups_iam = {
     for k, v in local.groups : k => "group:${v}"
   }
-  group_iam = {
-    (local.groups.workload-engineers) = [
+  iam_principals = {
+    "group:${local.groups.workload-engineers}" = [
       "roles/editor",
       "roles/iam.serviceAccountTokenCreator"
     ]
@@ -60,9 +60,9 @@ locals {
 
   log_sink_destinations = var.enable_features.log_sink ? merge(
     # use the same dataset for all sinks with `bigquery` as  destination
-    { for k, v in var.log_sinks : k => module.log-export-dataset.0 if v.type == "bigquery" },
+    { for k, v in var.log_sinks : k => module.log-export-dataset[0] if v.type == "bigquery" },
     # use the same gcs bucket for all sinks with `storage` as destination
-    { for k, v in var.log_sinks : k => module.log-export-gcs.0 if v.type == "storage" },
+    { for k, v in var.log_sinks : k => module.log-export-gcs[0] if v.type == "storage" },
     # use separate pubsub topics and logging buckets for sinks with
     # destination `pubsub` and `logging`
     module.log-export-pubsub,
@@ -71,18 +71,15 @@ locals {
 }
 
 module "folder" {
-  source                 = "../../../modules/folder"
-  folder_create          = var.folder_config.folder_create != null
-  parent                 = try(var.folder_config.folder_create.parent, null)
-  name                   = try(var.folder_config.folder_create.display_name, null)
-  id                     = var.folder_config.folder_create != null ? null : var.folder_config.folder_id
-  group_iam              = local.group_iam
-  org_policies_data_path = var.data_dir != null ? "${var.data_dir}/org-policies" : null
-  firewall_policy_factory = var.data_dir != null ? {
-    cidr_file   = "${var.data_dir}/firewall-policies/cidrs.yaml"
-    policy_name = "${var.prefix}-fw-policy"
-    rules_file  = "${var.data_dir}/firewall-policies/hierarchical-policy-rules.yaml"
-  } : null
+  source            = "../../../modules/folder"
+  folder_create     = var.folder_config.folder_create != null
+  parent            = try(var.folder_config.folder_create.parent, null)
+  name              = try(var.folder_config.folder_create.display_name, null)
+  id                = var.folder_config.folder_create != null ? null : var.folder_config.folder_id
+  iam_by_principals = local.iam_principals
+  factories_config = {
+    org_policies = var.data_dir != null ? "${var.data_dir}/org-policies" : null
+  }
   logging_sinks = var.enable_features.log_sink ? {
     for name, attrs in var.log_sinks : name => {
       bq_partitioned_table = attrs.type == "bigquery"
@@ -93,14 +90,24 @@ module "folder" {
   } : null
 }
 
+module "firewall-policy" {
+  source    = "../../../modules/net-firewall-policy"
+  name      = "default"
+  parent_id = module.folder.id
+  factories_config = var.data_dir == null ? {} : {
+    cidr_file_path          = "${var.data_dir}/firewall-policies/cidrs.yaml"
+    ingress_rules_file_path = "${var.data_dir}/firewall-policies/hierarchical-ingress-rules.yaml"
+  }
+}
+
 module "folder-workload" {
   source = "../../../modules/folder"
   parent = module.folder.id
   name   = "${var.prefix}-workload"
 }
 
+#TODO VPCSC: Access levels
 
-#TODO VPCSC: Access levels 
 data "google_projects" "folder-projects" {
   filter = "parent.id:${split("/", module.folder.id)[1]}"
 
@@ -121,7 +128,7 @@ module "vpc-sc" {
   service_perimeters_regular = {
     shielded = {
       # Move `spec` definition to `status` and comment `use_explicit_dry_run_spec` variable to enforce VPC-SC configuration
-      # Before enforing configuration check logs and create Access Level, Ingress/Egress policy as needed
+      # Before enforcing configuration check logs and create Access Level, Ingress/Egress policy as needed
 
       status = null
       spec = {

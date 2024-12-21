@@ -1,4 +1,4 @@
-# Copyright 2023 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,11 +34,11 @@ def test_policy_implementation():
       '@@ -17 +17 @@\n',
       '-# tfdoc:file:description Project-level organization policies.\n',
       '+# tfdoc:file:description Folder-level organization policies.\n',
-      '@@ -58,2 +58,2 @@\n',
-      '-      name   = "projects/${local.project.project_id}/policies/${k}"\n',
-      '-      parent = "projects/${local.project.project_id}"\n',
-      '+      name   = "${local.folder.name}/policies/${k}"\n',
-      '+      parent = local.folder.name\n',
+      '@@ -80,2 +80,2 @@\n',
+      '-  name   = "projects/${local.project.project_id}/policies/${each.value}"\n',
+      '-  parent = "projects/${local.project.project_id}"\n',
+      '+  name   = "${local.folder_id}/policies/${each.value}"\n',
+      '+  parent = local.folder_id\n',
   ]
 
   diff2 = difflib.unified_diff(lines['folder'], lines['organization'], 'folder',
@@ -49,18 +49,17 @@ def test_policy_implementation():
       '@@ -17 +17 @@\n',
       '-# tfdoc:file:description Folder-level organization policies.\n',
       '+# tfdoc:file:description Organization-level organization policies.\n',
-      '@@ -58,2 +58,2 @@\n',
-      '-      name   = "${local.folder.name}/policies/${k}"\n',
-      '-      parent = local.folder.name\n',
-      '+      name   = "${var.organization_id}/policies/${k}"\n',
-      '+      parent = var.organization_id\n',
-      '@@ -116,0 +117,10 @@\n',
+      '@@ -80,2 +80,2 @@\n',
+      '-  name   = "${local.folder_id}/policies/${each.value}"\n',
+      '-  parent = local.folder_id\n',
+      '+  name   = "${var.organization_id}/policies/${each.value}"\n',
+      '+  parent = var.organization_id\n',
+      '@@ -156,0 +157,9 @@\n',
       '+  depends_on = [\n',
-      '+    google_organization_iam_audit_config.config,\n',
       '+    google_organization_iam_binding.authoritative,\n',
+      '+    google_organization_iam_binding.bindings,\n',
+      '+    google_organization_iam_member.bindings,\n',
       '+    google_organization_iam_custom_role.roles,\n',
-      '+    google_organization_iam_member.additive,\n',
-      '+    google_organization_iam_policy.authoritative,\n',
       '+    google_org_policy_custom_constraint.constraint,\n',
       '+    google_tags_tag_key.default,\n',
       '+    google_tags_tag_value.default,\n',

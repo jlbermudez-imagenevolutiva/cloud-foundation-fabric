@@ -14,42 +14,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import datetime
 import time
-import os
 
 from airflow import models
-from airflow.operators import dummy
+from airflow.models.variable import Variable
+from airflow.operators import empty
 from airflow.providers.google.cloud.operators.dataproc import (
-    DataprocCreateBatchOperator, DataprocDeleteBatchOperator, DataprocGetBatchOperator, DataprocListBatchesOperator
-
-)
+    DataprocCreateBatchOperator)
 from airflow.utils.dates import days_ago
 
 # --------------------------------------------------------------------------------
 # Get variables
 # --------------------------------------------------------------------------------
-BQ_LOCATION = os.environ.get("BQ_LOCATION")
-CURATED_BQ_DATASET = os.environ.get("CURATED_BQ_DATASET")
-CURATED_GCS = os.environ.get("CURATED_GCS")
-CURATED_PRJ = os.environ.get("CURATED_PRJ")
-DP_KMS_KEY = os.environ.get("DP_KMS_KEY", "")
-DP_REGION = os.environ.get("DP_REGION")
-GCP_REGION = os.environ.get("GCP_REGION")
-LAND_PRJ = os.environ.get("LAND_PRJ")
-LAND_BQ_DATASET = os.environ.get("LAND_BQ_DATASET")
-LAND_GCS = os.environ.get("LAND_GCS")
-PHS_CLUSTER_NAME = os.environ.get("PHS_CLUSTER_NAME")
-PROCESSING_GCS = os.environ.get("PROCESSING_GCS")
-PROCESSING_PRJ = os.environ.get("PROCESSING_PRJ")
-PROCESSING_SA = os.environ.get("PROCESSING_SA")
-PROCESSING_SUBNET = os.environ.get("PROCESSING_SUBNET")
-PROCESSING_VPC = os.environ.get("PROCESSING_VPC")
+BQ_LOCATION = Variable.get("BQ_LOCATION")
+CURATED_BQ_DATASET = Variable.get("CURATED_BQ_DATASET")
+CURATED_GCS = Variable.get("CURATED_GCS")
+CURATED_PRJ = Variable.get("CURATED_PRJ")
+DP_KMS_KEY = Variable.get("DP_KMS_KEY", "")
+DP_REGION = Variable.get("DP_REGION")
+LAND_PRJ = Variable.get("LAND_PRJ")
+LAND_BQ_DATASET = Variable.get("LAND_BQ_DATASET")
+LAND_GCS = Variable.get("LAND_GCS")
+PHS_CLUSTER_NAME = Variable.get("PHS_CLUSTER_NAME")
+PROCESSING_GCS = Variable.get("PROCESSING_GCS")
+PROCESSING_PRJ = Variable.get("PROCESSING_PRJ")
+PROCESSING_SA = Variable.get("PROCESSING_SA")
+PROCESSING_SUBNET = Variable.get("PROCESSING_SUBNET")
+PROCESSING_VPC = Variable.get("PROCESSING_VPC")
 
-PYTHON_FILE_LOCATION = PROCESSING_GCS+"/pyspark_gcs2bq.py"
-PHS_CLUSTER_PATH = "projects/"+PROCESSING_PRJ+"/regions/"+DP_REGION+"/clusters/"+PHS_CLUSTER_NAME
+PYTHON_FILE_LOCATION = PROCESSING_GCS + "/pyspark_gcs2bq.py"
+PHS_CLUSTER_PATH = "projects/" + PROCESSING_PRJ + "/regions/" + DP_REGION + "/clusters/" + PHS_CLUSTER_NAME
 SPARK_BIGQUERY_JAR_FILE = "gs://spark-lib/bigquery/spark-bigquery-with-dependencies_2.13-0.29.0.jar"
-BATCH_ID = "batch-create-phs-"+str(int(time.time()))
+BATCH_ID = "batch-create-phs-" + str(int(time.time()))
 
 default_args = {
     # Tell airflow to start one day ago, so that it runs as soon as you upload it
@@ -61,42 +57,33 @@ with models.DAG(
     default_args=default_args,  # The interval with which to schedule the DAG
     schedule_interval=None,  # Override to match your needs
 ) as dag:
-    start = dummy.DummyOperator(
-        task_id='start',
-        trigger_rule='all_success'
-    )
+  start = empty.EmptyOperator(task_id='start', trigger_rule='all_success')
 
-    end = dummy.DummyOperator(
-        task_id='end',
-        trigger_rule='all_success'
-    )
+  end = empty.EmptyOperator(task_id='end', trigger_rule='all_success')
 
-    create_batch = DataprocCreateBatchOperator(
-        task_id="batch_create",
-        project_id=PROCESSING_PRJ,
-        batch_id=BATCH_ID,
-        batch={
-            "environment_config": {
-                "execution_config": {
-                    "service_account": PROCESSING_SA,
-                    "subnetwork_uri": PROCESSING_SUBNET
-                },
-                "peripherals_config": {
-                    "spark_history_server_config":{
-                        "dataproc_cluster": PHS_CLUSTER_PATH
-                    }
-                }
-            },
-            "pyspark_batch": {
-                "args": [
-                    LAND_GCS + "/customers.csv",
-                    CURATED_PRJ + ":" + CURATED_BQ_DATASET + ".customers",
-                    PROCESSING_GCS[5:]
-                ],
-                "main_python_file_uri": PYTHON_FILE_LOCATION,
-                "jar_file_uris": [SPARK_BIGQUERY_JAR_FILE]
-            }
-        }
-    )
+  create_batch = DataprocCreateBatchOperator(
+      task_id="batch_create", project_id=PROCESSING_PRJ, batch_id=BATCH_ID,
+      batch={
+          "environment_config": {
+              "execution_config": {
+                  "service_account": PROCESSING_SA,
+                  "subnetwork_uri": PROCESSING_SUBNET
+              },
+              "peripherals_config": {
+                  "spark_history_server_config": {
+                      "dataproc_cluster": PHS_CLUSTER_PATH
+                  }
+              }
+          },
+          "pyspark_batch": {
+              "args": [
+                  LAND_GCS + "/customers.csv",
+                  CURATED_PRJ + ":" + CURATED_BQ_DATASET + ".customers",
+                  PROCESSING_GCS[5:]
+              ],
+              "main_python_file_uri": PYTHON_FILE_LOCATION,
+              "jar_file_uris": [SPARK_BIGQUERY_JAR_FILE]
+          }
+      })
 
-    start >> create_batch >> end
+  start >> create_batch >> end

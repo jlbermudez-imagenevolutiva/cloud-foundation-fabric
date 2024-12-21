@@ -33,10 +33,7 @@ variable "overlay_config" {
         ip_ranges   = map(string)
       }))
     })
-    onprem_vpn_gateway = object({
-      redundancy_type = optional(string, "TWO_IPS_REDUNDANCY")
-      interfaces      = list(string)
-    })
+    onprem_vpn_gateway_interfaces = list(string)
     gateways = map(map(object({
       bgp_peer = object({
         address        = string
@@ -88,5 +85,10 @@ variable "underlay_config" {
     gcp_bgp = object({
       asn = number
     })
+    interconnect_type = optional(string, "DEDICATED")
   })
+  validation {
+    condition     = var.underlay_config.interconnect_type == "DEDICATED" || var.underlay_config.interconnect_type == "PARTNER"
+    error_message = "var.underlay_config.interconnect_type must by either \"DEDICATED\" or \"PARTNER\""
+  }
 }

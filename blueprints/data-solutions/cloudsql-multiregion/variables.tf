@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,17 @@
  * limitations under the License.
  */
 
-variable "data_eng_principals" {
-  description = "Groups with Service Account Token creator role on service accounts in IAM format, only user supported on CloudSQL, eg 'user@domain.com'."
-  type        = list(string)
-  default     = []
+variable "data_eng_principal" {
+  description = "Group or user in IAM format (`group:foo@example.com`) with permissions to access resources and impersonate service accounts."
+  type        = string
+  default     = null
+}
+
+variable "deletion_protection" {
+  description = "Prevent Terraform from destroying data storage resources (storage buckets, GKE clusters, CloudSQL instances) in this blueprint. When this field is set in Terraform state, a terraform destroy or terraform apply that would delete data storage resources will fail."
+  type        = bool
+  default     = false
+  nullable    = false
 }
 
 variable "network_config" {
@@ -79,9 +86,10 @@ variable "regions" {
 }
 
 variable "service_encryption_keys" {
-  description = "Cloud KMS keys to use to encrypt resources. Provide a key for each reagion configured."
+  description = "Cloud KMS keys to use to encrypt resources. Provide a key for each region configured."
   type        = map(string)
-  default     = null
+  default     = {}
+  nullable    = false
 }
 
 variable "sql_configuration" {
@@ -98,4 +106,10 @@ variable "sql_configuration" {
     psa_range         = "10.60.0.0/16"
     tier              = "db-g1-small"
   }
+}
+
+variable "sql_users" {
+  description = "Cloud SQL user emails."
+  type        = list(string)
+  default     = []
 }

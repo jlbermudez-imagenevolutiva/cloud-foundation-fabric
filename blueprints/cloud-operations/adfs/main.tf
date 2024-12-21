@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -79,7 +79,9 @@ module "server" {
       -Force
     EOT
   }
-  service_account_create = true
+  service_account = {
+    auto_create = true
+  }
   boot_disk = {
     initialize_params = {
       image = var.image
@@ -96,7 +98,7 @@ module "server" {
 }
 
 module "glb" {
-  source     = "../../../modules/net-glb"
+  source     = "../../../modules/net-lb-app-ext"
   name       = "${var.prefix}-glb"
   project_id = module.project.project_id
   protocol   = "HTTPS"
@@ -117,7 +119,7 @@ module "glb" {
   ssl_certificates = {
     managed_configs = {
       adfs-domain = {
-        domains = ["${var.adfs_dns_domain_name}"]
+        domains = [var.adfs_dns_domain_name]
       }
     }
   }

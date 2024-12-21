@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ variable "log_analytics" {
   type = object({
     enable          = optional(bool, false)
     dataset_link_id = optional(string)
+    description     = optional(string, "Log Analytics Dataset")
   })
   nullable = false
   default  = {}
@@ -61,4 +62,40 @@ variable "retention" {
   description = "Retention time in days for the logging bucket."
   type        = number
   default     = 30
+}
+
+variable "tag_bindings" {
+  description = "Tag bindings for this bucket, in key => tag value id format."
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
+variable "views" {
+  description = "Log views for this bucket."
+  type = map(object({
+    filter      = string
+    location    = optional(string)
+    description = optional(string)
+    iam         = optional(map(list(string)), {})
+    iam_bindings = optional(map(object({
+      members = list(string)
+      condition = optional(object({
+        expression  = string
+        title       = string
+        description = optional(string)
+      }))
+    })), {})
+    iam_bindings_additive = optional(map(object({
+      member = string
+      role   = string
+      condition = optional(object({
+        expression  = string
+        title       = string
+        description = optional(string)
+      }))
+    })), {})
+  }))
+  default  = {}
+  nullable = false
 }

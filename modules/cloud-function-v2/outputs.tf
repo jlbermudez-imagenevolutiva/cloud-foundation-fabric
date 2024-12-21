@@ -17,7 +17,7 @@
 output "bucket" {
   description = "Bucket resource (only if auto-created)."
   value = try(
-    var.bucket_config == null ? null : google_storage_bucket.bucket.0, null
+    var.bucket_config == null ? null : google_storage_bucket.bucket[0], null
   )
 }
 
@@ -66,14 +66,14 @@ output "trigger_service_account" {
 
 output "trigger_service_account_email" {
   description = "Service account email."
-  value       = local.trigger_service_account_email
+  value       = local.trigger_sa_email
 }
 
 output "trigger_service_account_iam_email" {
   description = "Service account email."
   value = join("", [
     "serviceAccount:",
-    local.trigger_service_account_email == null ? "" : local.trigger_service_account_email
+    local.trigger_sa_email == null ? "" : local.trigger_sa_email
   ])
 }
 
@@ -84,5 +84,5 @@ output "uri" {
 
 output "vpc_connector" {
   description = "VPC connector resource if created."
-  value       = try(google_vpc_access_connector.connector.0.id, null)
+  value       = try(google_vpc_access_connector.connector[0].id, null)
 }

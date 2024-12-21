@@ -4,11 +4,13 @@
 
 This blueprint contains all the necessary Terraform modules to build and __privately__ expose a Cloud Run service in a variety of use cases.
 
-The content of this blueprint corresponds to the chapter '_Developing an enterprise application - The corporate environment_' of the [__Serverless Networking Guide__](https://services.google.com/fh/files/misc/serverless_networking_guide.pdf). This guide is an easy to follow introduction to Cloud Run, where a couple of friendly characters will guide you from the basics to more advanced topics with a very practical approach and in record time! The code here complements this learning and allows you to test the scenarios presented and your knowledge.
+The content of this blueprint corresponds to the chapter '_The corporate environment - Developing an enterprise application_' of the [__Serverless Networking Guide__](https://services.google.com/fh/files/misc/serverless_networking_guide.pdf). This guide is an easy to follow introduction to Cloud Run, where a couple of friendly characters will guide you from the basics to more advanced topics with a very practical approach and in record time! The code here complements this learning and allows you to test the scenarios presented and your knowledge.
 
 If you are interested in following this guide, take a look to the chapters' blueprints:
-* [My serverless "Hello, World! - Exploring Cloud Run](https://github.com/GoogleCloudPlatform/cloud-foundation-fabric/tree/master/blueprints/serverless/cloud-run-explore)
-* [Developing an enterprise application - The corporate environment](https://github.com/GoogleCloudPlatform/cloud-foundation-fabric/tree/master/blueprints/serverless/cloud-run-corporate)
+
+* [Exploring Cloud Run - My serverless "Hello, World!"](https://github.com/GoogleCloudPlatform/cloud-foundation-fabric/tree/master/blueprints/serverless/cloud-run-explore)
+* [The corporate environment - Developing an enterprise application](https://github.com/GoogleCloudPlatform/cloud-foundation-fabric/tree/master/blueprints/serverless/cloud-run-corporate)
+* [Microservices architectures - Developing Microservices applications](https://github.com/GoogleCloudPlatform/cloud-foundation-fabric/tree/master/blueprints/serverless/cloud-run-microservices)
 
 ## Architecture
 
@@ -16,7 +18,7 @@ This blueprint creates multiple architectures depending on the use case. Some ma
 
 ## Prerequisites
 
-Depending on the use case, you will need one or more projects with [billing enabled](https://cloud.google.com/billing/docs/how-to/modify-project) and a user with the “Project owner” [IAM](https://cloud.google.com/iam) role on those projects. You can use existing projects or let the blueprint creates them for you but in that case you will need to add extra information for each project. E.g.:
+Depending on the use case, you will need one or more projects. You can use existing projects or let the blueprint create them for you but in that case you will need to add extra information for each project. E.g.:
 
 ```tfvars
 # Create the main project
@@ -26,28 +28,34 @@ prj_main_create = {
 }
 ```
 
-Below it is explained how to set this information.
+How to set this kind of information is explained in the next section.
 
 ## Spinning up the architecture
 
 ### General steps
 
 1. Clone the repo to your local machine or Cloud Shell:
+
 ```bash
 git clone https://github.com/GoogleCloudPlatform/cloud-foundation-fabric
 ```
 
 2. Change to the directory of the blueprint:
+
 ```bash
 cd cloud-foundation-fabric/blueprints/serverless/cloud-run-corporate
 ```
+
 You should see this README and some terraform files.
 
-3. To deploy a specific use case, you will need to create a file in this directory called `terraform.tfvars` and follow the corresponding instructions to set variables. Sometimes values that are meant to be substituted will be shown inside brackets but you need to omit these brackets. E.g.:
+3. To deploy a specific use case, you will need to create a file in this directory called `terraform.tfvars` and follow the corresponding instructions to set variables. Values that are meant to be substituted will be shown inside brackets but you need to omit these brackets. E.g.:
+
 ```tfvars
 project_id = "[your-project_id]"
 ```
+
 may become
+
 ```tfvars
 project_id = "spiritual-hour-331417"
 ```
@@ -55,13 +63,14 @@ project_id = "spiritual-hour-331417"
 Use cases are self-contained so you can deploy any of them at will.
 
 4. The usual terraform commands will do the work:
+
 ```bash
 terraform init
 terraform plan
 terraform apply
 ```
 
-The resource creation will take a few minutes but when it’s complete, you should see an output stating the command completed successfully with a list of the created resources, and some output variables with information to access your service.
+It will take a few minutes. When complete, you should see an output stating the command completed successfully, a list of the created resources, and some output variables with information to access your services.
 
 __Congratulations!__ You have successfully deployed the use case you chose based on the variables configuration.
 
@@ -72,10 +81,13 @@ This use case deploys a Cloud Run service and a VM in the same project. To priva
 <p align="center"> <img src="images/use-case-1.png" width="600"> </p>
 
 In this case the only variable that you need to set in `terraform.tfvars` is the main project ID:
+
 ```tfvars
 prj_main_id = "[your-main-project-id]"
 ```
+
 Alternatively you can pass this value on the command line:
+
 ```bash
 terraform apply -var prj_main_id="[your-main-project-id]"
 ```
@@ -93,6 +105,7 @@ This use case deploys a Cloud Run service in a GCP project and simulates an on-p
 <p align="center"> <img src="images/use-case-2.png" width="600"> </p>
 
 You will need to set both the main and the on-prem project IDs in `terraform.tfvars`:
+
 ```tfvars
 prj_main_id   = "[your-main-project-id]"
 prj_onprem_id = "[your-onprem-project-id]"
@@ -165,11 +178,11 @@ prj_svc1_id = "[your-service-project1-id]"
 
 ### Use case 4: Access to Cloud Run with custom domain
 
-You need to use a L7 ILB with Serverless NEGs (in Preview) to set a custom domain for Cloud Run. As a practical example, this blueprint deploys this configuration in a Shared VPC environment with two Cloud Run services running in a service project and the ILB exposing them via a custom domain, pointing to them through a URL map: `/cart` and `/checkout`.
+You need to use an Internal Application LB (L7) with Serverless NEGs (in Preview) to set a custom domain for Cloud Run. As a practical example, this blueprint deploys this configuration in a Shared VPC environment with two Cloud Run services running in a service project and the LB exposing them via a custom domain, pointing to them through a URL map: `/cart` and `/checkout`.
 
 <p align="center"> <img src="images/use-case-4.png" width="600"> </p>
 
-The blueprint uses an HTTP connection to the ILB to avoid management of SSL certificates. To test access, VMs are created in the host and service projects. Set the following in `terraform.tfvars`:
+The blueprint uses an HTTP connection to the LB to avoid management of SSL certificates. To test access, VMs are created in the host and service projects. Set the following in `terraform.tfvars`:
 
 ```tfvars
 prj_main_id   = "[your-main-project-id]" # Used as host project
@@ -184,10 +197,12 @@ SSH into a test VM and run `curl` specifying as URL the host, your custom domain
 ## Cleaning up your environment
 
 The easiest way to remove all the deployed resources is to run the following command:
+
 ```bash
 terraform destroy
 ```
-The above command will delete the associated resources so there will be no billable charges made afterwards. Projects are removed from Terraform state but not deleted from Google Cloud.
+
+The above command will delete the associated resources so there will be no billable charges afterwards. Projects are removed from Terraform state but not deleted from Google Cloud.
 <!-- BEGIN TFDOC -->
 
 ## Variables
@@ -238,7 +253,7 @@ module "test" {
   prj_onprem_id = "onprem-project-id"
 }
 
-# tftest modules=15 resources=50
+# tftest modules=15 resources=62
 ```
 
 ```hcl
@@ -262,7 +277,7 @@ module "test" {
   tf_identity = "user@example.org"
 }
 
-# tftest modules=15 resources=36
+# tftest modules=15 resources=44
 ```
 
 ```hcl
@@ -281,5 +296,5 @@ module "test" {
   custom_domain = "cloud-run-corporate.example.org"
 }
 
-# tftest modules=14 resources=45
+# tftest modules=14 resources=57
 ```

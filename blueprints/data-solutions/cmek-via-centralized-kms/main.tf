@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -38,12 +38,8 @@ module "project-service" {
     "storage-component.googleapis.com",
   ]
   service_encryption_key_ids = {
-    compute = [
-      local.kms_keys.gce
-    ]
-    storage = [
-      local.kms_keys.gcs
-    ]
+    "compute.googleapis.com" = [local.kms_keys.gce]
+    "storage.googleapis.com" = [local.kms_keys.gcs]
   }
   service_config = {
     disable_on_destroy = false, disable_dependent_services = false
@@ -106,7 +102,10 @@ module "kms" {
     name     = "${var.prefix}-${var.region}",
     location = var.region
   }
-  keys = { key-gce = null, key-gcs = null }
+  keys = {
+    key-gce = {}
+    key-gcs = {}
+  }
 }
 
 ###############################################################################
@@ -160,4 +159,5 @@ module "kms-gcs" {
   location       = var.region
   storage_class  = "REGIONAL"
   encryption_key = local.kms_keys.gcs
+  force_destroy  = !var.deletion_protection
 }

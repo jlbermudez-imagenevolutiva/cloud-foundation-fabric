@@ -53,7 +53,7 @@ values:
       - egress_from:
         - identities:
           - serviceAccount:foo@myproject.iam.gserviceaccount.com
-          identity_type: ANY_IDENTITY
+          identity_type: null
         egress_to:
         - external_resources: null
           operations:
@@ -66,7 +66,8 @@ values:
       ingress_policies:
       - ingress_from:
         - identities:
-          - serviceAccount:test-tf@myproject.iam.gserviceaccount.com
+          - serviceAccount:test-tf-0@myproject.iam.gserviceaccount.com
+          - serviceAccount:test-tf-1@myproject.iam.gserviceaccount.com
           identity_type: null
           sources:
           - resource: null

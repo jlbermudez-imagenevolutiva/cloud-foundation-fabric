@@ -28,7 +28,6 @@ variable "attached_disk_defaults" {
     replica_zone = null
     type         = "pd-balanced"
   }
-
   validation {
     condition     = var.attached_disk_defaults.mode == "READ_WRITE" || !var.attached_disk_defaults.auto_delete
     error_message = "auto_delete can only be specified on READ_WRITE disks."
@@ -40,9 +39,11 @@ variable "attached_disks" {
   type = list(object({
     name        = string
     device_name = optional(string)
-    size        = string
-    source      = optional(string)
-    source_type = optional(string)
+    # TODO: size can be null when source_type is attach
+    size              = string
+    snapshot_schedule = optional(list(string))
+    source            = optional(string)
+    source_type       = optional(string)
     options = optional(
       object({
         auto_delete  = optional(bool, false)
@@ -82,18 +83,35 @@ variable "attached_disks" {
 variable "boot_disk" {
   description = "Boot disk properties."
   type = object({
-    auto_delete = optional(bool, true)
-    source      = optional(string)
+    auto_delete       = optional(bool, true)
+    snapshot_schedule = optional(list(string))
+    source            = optional(string)
     initialize_params = optional(object({
       image = optional(string, "projects/debian-cloud/global/images/family/debian-11")
       size  = optional(number, 10)
       type  = optional(string, "pd-balanced")
     }))
+    use_independent_disk = optional(bool, false)
   })
   default = {
     initialize_params = {}
   }
   nullable = false
+  validation {
+    condition = (
+      (var.boot_disk.source == null ? 0 : 1) +
+      (var.boot_disk.initialize_params == null ? 0 : 1) < 2
+    )
+    error_message = "You can only have one of boot disk source or initialize params."
+  }
+  validation {
+    condition = (
+      var.boot_disk.use_independent_disk != true
+      ||
+      var.boot_disk.initialize_params != null
+    )
+    error_message = "Using an independent disk for boot requires initialize params."
+  }
 }
 
 variable "can_ip_forward" {
@@ -135,6 +153,35 @@ variable "encryption" {
   default = null
 }
 
+variable "gpu" {
+  description = "GPU information. Based on https://cloud.google.com/compute/docs/gpus."
+  type = object({
+    count = number
+    type  = string
+  })
+  default = null
+
+  validation {
+    condition = (
+      var.gpu == null ||
+      contains(
+        [
+          "nvidia-tesla-a100",
+          "nvidia-tesla-p100",
+          "nvidia-tesla-v100",
+          "nvidia-tesla-k80",
+          "nvidia-tesla-p4",
+          "nvidia-tesla-t4",
+          "nvidia-l4",
+          "nvidia-a2"
+        ],
+        try(var.gpu.type, "-")
+      )
+    )
+    error_message = "GPU type must be one of the allowed values: nvidia-tesla-a100, nvidia-tesla-p100, nvidia-tesla-v100, nvidia-tesla-k80, nvidia-tesla-p4, nvidia-tesla-t4, nvidia-l4, nvidia-a2."
+  }
+}
+
 variable "group" {
   description = "Define this variable to create an instance group for instances. Disabled for template use."
   type = object({
@@ -153,6 +200,41 @@ variable "iam" {
   description = "IAM bindings in {ROLE => [MEMBERS]} format."
   type        = map(list(string))
   default     = {}
+}
+
+variable "instance_schedule" {
+  description = "Assign or create and assign an instance schedule policy. Either resource policy id or create_config must be specified if not null. Set active to null to dtach a policy from vm before destroying."
+  type = object({
+    resource_policy_id = optional(string)
+    create_config = optional(object({
+      active          = optional(bool, true)
+      description     = optional(string)
+      expiration_time = optional(string)
+      start_time      = optional(string)
+      timezone        = optional(string, "UTC")
+      vm_start        = optional(string)
+      vm_stop         = optional(string)
+    }))
+  })
+  default = null
+  validation {
+    condition = (
+      var.instance_schedule == null ||
+      try(var.instance_schedule.resource_policy_id, null) != null ||
+      try(var.instance_schedule.create_config, null) != null
+    )
+    error_message = "A resource policy name or configuration must be specified when not null."
+  }
+  validation {
+    condition = (
+      try(var.instance_schedule.create_config, null) == null ||
+      length(compact([
+        try(var.instance_schedule.create_config.vm_start, null),
+        try(var.instance_schedule.create_config.vm_stop, null)
+      ])) > 0
+    )
+    error_message = "A resource policy configuration must contain at least one schedule."
+  }
 }
 
 variable "instance_type" {
@@ -184,18 +266,26 @@ variable "name" {
   type        = string
 }
 
+variable "network_attached_interfaces" {
+  description = "Network interfaces using network attachments."
+  type        = list(string)
+  nullable    = false
+  default     = []
+}
+
 variable "network_interfaces" {
   description = "Network interfaces configuration. Use self links for Shared VPC, set addresses to null if not needed."
   type = list(object({
-    nat        = optional(bool, false)
     network    = string
     subnetwork = string
+    alias_ips  = optional(map(string), {})
+    nat        = optional(bool, false)
+    nic_type   = optional(string)
+    stack_type = optional(string)
     addresses = optional(object({
       internal = optional(string)
       external = optional(string)
     }), null)
-    alias_ips = optional(map(string), {})
-    nic_type  = optional(string)
   }))
 }
 
@@ -204,8 +294,16 @@ variable "options" {
   type = object({
     allow_stopping_for_update = optional(bool, true)
     deletion_protection       = optional(bool, false)
-    spot                      = optional(bool, false)
-    termination_action        = optional(string)
+    max_run_duration = optional(object({
+      nanos   = optional(number)
+      seconds = number
+    }))
+    node_affinities = optional(map(object({
+      values = list(string)
+      in     = optional(bool, true)
+    })), {})
+    spot               = optional(bool, false)
+    termination_action = optional(string)
   })
   default = {
     allow_stopping_for_update = true
@@ -239,23 +337,13 @@ variable "scratch_disks" {
 }
 
 variable "service_account" {
-  description = "Service account email. Unused if service account is auto-created."
-  type        = string
-  default     = null
-}
-
-variable "service_account_create" {
-  description = "Auto-create service account."
-  type        = bool
-  default     = false
-}
-
-# scopes and scope aliases list
-# https://cloud.google.com/sdk/gcloud/reference/compute/instances/create#--scopes
-variable "service_account_scopes" {
-  description = "Scopes applied to service account."
-  type        = list(string)
-  default     = []
+  description = "Service account email and scopes. If email is null, the default Compute service account will be used unless auto_create is true, in which case a service account will be created. Set the variable to null to avoid attaching a service account."
+  type = object({
+    auto_create = optional(bool, false)
+    email       = optional(string)
+    scopes      = optional(list(string))
+  })
+  default = {}
 }
 
 variable "shielded_config" {
@@ -268,8 +356,57 @@ variable "shielded_config" {
   default = null
 }
 
+variable "snapshot_schedules" {
+  description = "Snapshot schedule resource policies that can be attached to disks."
+  type = map(object({
+    schedule = object({
+      daily = optional(object({
+        days_in_cycle = number
+        start_time    = string
+      }))
+      hourly = optional(object({
+        hours_in_cycle = number
+        start_time     = string
+      }))
+      weekly = optional(list(object({
+        day        = string
+        start_time = string
+      })))
+    })
+    description = optional(string)
+    retention_policy = optional(object({
+      max_retention_days         = number
+      on_source_disk_delete_keep = optional(bool)
+    }))
+    snapshot_properties = optional(object({
+      chain_name        = optional(string)
+      guest_flush       = optional(bool)
+      labels            = optional(map(string))
+      storage_locations = optional(list(string))
+    }))
+  }))
+  nullable = false
+  default  = {}
+  validation {
+    condition = alltrue([
+      for k, v in var.snapshot_schedules : (
+        (v.schedule.daily != null ? 1 : 0) +
+        (v.schedule.hourly != null ? 1 : 0) +
+        (v.schedule.weekly != null ? 1 : 0)
+      ) == 1
+    ])
+    error_message = "Schedule must contain exactly one of daily, hourly, or weekly schedule."
+  }
+}
+
 variable "tag_bindings" {
-  description = "Tag bindings for this instance, in key => tag value id format."
+  description = "Resource manager tag bindings for this instance, in tag key => tag value format."
+  type        = map(string)
+  default     = null
+}
+
+variable "tag_bindings_firewall" {
+  description = "Firewall (network scoped) tag bindings for this instance, in tag key => tag value format."
   type        = map(string)
   default     = null
 }
@@ -284,3 +421,5 @@ variable "zone" {
   description = "Compute zone."
   type        = string
 }
+
+

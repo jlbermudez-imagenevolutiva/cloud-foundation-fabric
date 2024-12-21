@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,45 +15,35 @@
 values:
   module.folder.google_folder.folder[0]:
     display_name: Folder name
-    parent: organizations/1234567890
+    parent: folders/1122334455
+    timeouts: null
   module.folder.google_folder_iam_binding.authoritative["roles/owner"]:
     condition: []
     members:
-    - group:cloud-owners@example.org
-    - user:one@example.org
+    - group:organization-admins@example.org
+    - serviceAccount:sa1@sa.example
     role: roles/owner
   module.folder.google_folder_iam_binding.authoritative["roles/resourcemanager.folderAdmin"]:
     condition: []
     members:
-    - group:cloud-owners@example.org
+    - group:organization-admins@example.org
     role: roles/resourcemanager.folderAdmin
   module.folder.google_folder_iam_binding.authoritative["roles/resourcemanager.projectCreator"]:
     condition: []
     members:
-    - group:cloud-owners@example.org
+    - group:organization-admins@example.org
     role: roles/resourcemanager.projectCreator
-  module.folder.google_folder_iam_member.additive["roles/compute.admin-user:a1@example.org"]:
+  module.folder.google_folder_iam_member.bindings["am1-storage-admin"]:
     condition: []
-    member: user:a1@example.org
-    role: roles/compute.admin
-  module.folder.google_folder_iam_member.additive["roles/compute.admin-user:a2@example.org"]:
-    condition: []
-    member: user:a2@example.org
-    role: roles/compute.admin
-  module.folder.google_folder_iam_member.additive["roles/compute.viewer-user:a2@example.org"]:
-    condition: []
-    member: user:a2@example.org
-    role: roles/compute.viewer
-  module.folder.google_folder_iam_member.additive["roles/storage.admin-user:am1@example.org"]:
-    condition: []
-    member: user:am1@example.org
+    member: serviceAccount:sa1@sa.example
     role: roles/storage.admin
-  module.folder.google_folder_iam_member.additive["roles/storage.objectViewer-user:am2@example.org"]:
-    condition: []
-    member: user:am2@example.org
-    role: roles/storage.objectViewer
 
 counts:
   google_folder: 1
   google_folder_iam_binding: 3
-  google_folder_iam_member: 5
+  google_folder_iam_member: 1
+  modules: 1
+  resources: 5
+
+outputs: {}
+

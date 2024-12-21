@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,45 +14,66 @@
  * limitations under the License.
  */
 
-# tfdoc:file:description IAM bindings, roles and audit logging resources.
+# tfdoc:file:description IAM bindings.
 
 locals {
-  _group_iam_roles = distinct(flatten(values(var.group_iam)))
-  _group_iam = {
-    for r in local._group_iam_roles : r => [
-      for k, v in var.group_iam : "group:${k}" if try(index(v, r), null) != null
-    ]
-  }
-  _iam_additive_pairs = flatten([
-    for role, members in var.iam_additive : [
-      for member in members : { role = role, member = member }
-    ]
-  ])
-  _iam_additive_member_pairs = flatten([
-    for member, roles in var.iam_additive_members : [
-      for role in roles : { role = role, member = member }
-    ]
-  ])
-  iam = {
-    for role in distinct(concat(keys(var.iam), keys(local._group_iam))) :
-    role => concat(
-      try(var.iam[role], []),
-      try(local._group_iam[role], [])
+  _custom_roles = {
+    for f in try(fileset(var.factories_config.custom_roles, "*.yaml"), []) :
+    replace(f, ".yaml", "") => yamldecode(
+      file("${var.factories_config.custom_roles}/${f}")
     )
   }
-  iam_additive = {
-    for pair in concat(local._iam_additive_pairs, local._iam_additive_member_pairs) :
-    "${pair.role}-${pair.member}" => pair
+  _iam_principal_roles = distinct(flatten(values(var.iam_by_principals)))
+  _iam_principals = {
+    for r in local._iam_principal_roles : r => [
+      for k, v in var.iam_by_principals :
+      k if try(index(v, r), null) != null
+    ]
+  }
+  custom_roles = merge(
+    {
+      for k, v in local._custom_roles : k => {
+        name        = lookup(v, "name", k)
+        permissions = v["includedPermissions"]
+      }
+    },
+    {
+      for k, v in var.custom_roles : k => {
+        name        = k
+        permissions = v
+      }
+    }
+  )
+  iam = {
+    for role in distinct(concat(keys(var.iam), keys(local._iam_principals))) :
+    role => concat(
+      try(var.iam[role], []),
+      try(local._iam_principals[role], [])
+    )
+  }
+}
+
+# we use a different key for custom roles to allow referring to the role alias
+# in Terraform, while still being able to define unique role names
+
+check "custom_roles" {
+  assert {
+    condition = (
+      length(local.custom_roles) == length({
+        for k, v in local.custom_roles : v.name => null
+      })
+    )
+    error_message = "Duplicate role name in custom roles."
   }
 }
 
 resource "google_organization_iam_custom_role" "roles" {
-  for_each    = var.custom_roles
+  for_each    = local.custom_roles
   org_id      = local.organization_id_numeric
-  role_id     = each.key
-  title       = "Custom role ${each.key}"
+  role_id     = each.value.name
+  title       = "Custom role ${each.value.name}"
   description = "Terraform-managed."
-  permissions = each.value
+  permissions = each.value.permissions
 }
 
 resource "google_organization_iam_binding" "authoritative" {
@@ -60,60 +81,37 @@ resource "google_organization_iam_binding" "authoritative" {
   org_id   = local.organization_id_numeric
   role     = each.key
   members  = each.value
+  # ensuring that custom role exists is left to the caller, by leveraging custom_role_id output
 }
 
-resource "google_organization_iam_member" "additive" {
-  for_each = (
-    length(var.iam_additive) + length(var.iam_additive_members) > 0
-    ? local.iam_additive
-    : {}
-  )
-  org_id = local.organization_id_numeric
-  role   = each.value.role
-  member = each.value.member
-}
-
-resource "google_organization_iam_policy" "authoritative" {
-  count       = var.iam_bindings_authoritative != null || var.iam_audit_config_authoritative != null ? 1 : 0
-  org_id      = local.organization_id_numeric
-  policy_data = data.google_iam_policy.authoritative.policy_data
-}
-
-data "google_iam_policy" "authoritative" {
-  dynamic "binding" {
-    for_each = var.iam_bindings_authoritative != null ? var.iam_bindings_authoritative : {}
-    content {
-      role    = binding.key
-      members = binding.value
-    }
-  }
-
-  dynamic "audit_config" {
-    for_each = var.iam_audit_config_authoritative != null ? var.iam_audit_config_authoritative : {}
-    content {
-      service = audit_config.key
-      dynamic "audit_log_configs" {
-        for_each = audit_config.value
-        iterator = config
-        content {
-          log_type         = config.key
-          exempted_members = config.value
-        }
-      }
-    }
-  }
-}
-
-resource "google_organization_iam_audit_config" "config" {
-  for_each = var.iam_audit_config
+resource "google_organization_iam_binding" "bindings" {
+  for_each = var.iam_bindings
   org_id   = local.organization_id_numeric
-  service  = each.key
-  dynamic "audit_log_config" {
-    for_each = each.value
-    iterator = config
+  role     = each.value.role
+  members  = each.value.members
+  dynamic "condition" {
+    for_each = each.value.condition == null ? [] : [""]
     content {
-      log_type         = config.key
-      exempted_members = config.value
+      expression  = each.value.condition.expression
+      title       = each.value.condition.title
+      description = each.value.condition.description
     }
   }
+  # ensuring that custom role exists is left to the caller, by leveraging custom_role_id output
+}
+
+resource "google_organization_iam_member" "bindings" {
+  for_each = var.iam_bindings_additive
+  org_id   = local.organization_id_numeric
+  role     = each.value.role
+  member   = each.value.member
+  dynamic "condition" {
+    for_each = each.value.condition == null ? [] : [""]
+    content {
+      expression  = each.value.condition.expression
+      title       = each.value.condition.title
+      description = each.value.condition.description
+    }
+  }
+  # ensuring that custom role exists is left to the caller, by leveraging custom_role_id output
 }

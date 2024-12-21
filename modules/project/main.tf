@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,14 +24,14 @@ locals {
   project = (
     var.project_create ?
     {
-      project_id = try(google_project.project.0.project_id, null)
-      number     = try(google_project.project.0.number, null)
-      name       = try(google_project.project.0.name, null)
+      project_id = try(google_project.project[0].project_id, null)
+      number     = try(google_project.project[0].number, null)
+      name       = try(google_project.project[0].name, null)
     }
     : {
       project_id = "${local.prefix}${var.name}"
-      number     = try(data.google_project.project.0.number, null)
-      name       = try(data.google_project.project.0.name, null)
+      number     = try(data.google_project.project[0].number, null)
+      name       = try(data.google_project.project[0].name, null)
     }
   )
 }
@@ -50,7 +50,14 @@ resource "google_project" "project" {
   billing_account     = var.billing_account
   auto_create_network = var.auto_create_network
   labels              = var.labels
-  skip_delete         = var.skip_delete
+  deletion_policy     = var.deletion_policy
+
+  lifecycle {
+    precondition {
+      condition     = var.skip_delete == null
+      error_message = "skip_delete is deprecated. Use deletion_policy."
+    }
+  }
 }
 
 resource "google_project_service" "project_services" {
@@ -59,19 +66,21 @@ resource "google_project_service" "project_services" {
   service                    = each.value
   disable_on_destroy         = var.service_config.disable_on_destroy
   disable_dependent_services = var.service_config.disable_dependent_services
+  depends_on                 = [google_org_policy_policy.default]
 }
 
-resource "google_compute_project_metadata_item" "oslogin_meta" {
-  count   = var.oslogin ? 1 : 0
-  project = local.project.project_id
-  key     = "enable-oslogin"
-  value   = "TRUE"
-  # depend on services or it will fail on destroy
+resource "google_compute_project_metadata_item" "default" {
+  for_each = (
+    contains(var.services, "compute.googleapis.com") ? var.compute_metadata : {}
+  )
+  project    = local.project.project_id
+  key        = each.key
+  value      = each.value
   depends_on = [google_project_service.project_services]
 }
 
 resource "google_resource_manager_lien" "lien" {
-  count        = var.lien_reason != "" ? 1 : 0
+  count        = var.lien_reason != null ? 1 : 0
   parent       = "projects/${local.project.number}"
   restrictions = ["resourcemanager.projects.delete"]
   origin       = "created-by-terraform"
@@ -85,6 +94,11 @@ resource "google_essential_contacts_contact" "contact" {
   email                               = each.key
   language_tag                        = "en"
   notification_category_subscriptions = each.value
+  depends_on = [
+    google_project_iam_binding.authoritative,
+    google_project_iam_binding.bindings,
+    google_project_iam_member.bindings
+  ]
 }
 
 resource "google_monitoring_monitored_project" "primary" {

@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,22 +20,27 @@ locals {
   cicd_workflows = {
     for k, v in local.cicd_repositories : k => templatefile(
       "${path.module}/templates/workflow-${v.type}.yaml", {
+        # If users give a list of custom audiences we set by default the first element.
+        # If no audiences are given, we set https://iam.googleapis.com/{PROVIDER_NAME}
+        audiences = try(
+          local.cicd_providers[v["identity_provider"]].audiences, ""
+        )
         identity_provider = try(
           local.cicd_providers[v["identity_provider"]].name, ""
         )
         outputs_bucket = module.automation-tf-output-gcs.name
-        service_account = try(
-          module.automation-tf-cicd-sa[k].email, ""
-        )
-        stage_name        = k
-        tf_providers_file = local.cicd_workflow_providers[k]
-        tf_var_files      = local.cicd_workflow_var_files[k]
+        service_accounts = {
+          apply = try(module.automation-tf-cicd-sa[k].email, "")
+          plan  = try(module.automation-tf-cicd-r-sa[k].email, "")
+        }
+        stage_name = k
+        tf_providers_files = {
+          apply = local.cicd_workflow_providers[k]
+          plan  = local.cicd_workflow_providers["${k}_r"]
+        }
+        tf_var_files = local.cicd_workflow_var_files[k]
       }
     )
-  }
-  custom_roles = {
-    for k, v in var.custom_role_names :
-    k => try(module.organization.custom_role_id[v], null)
   }
   providers = {
     "0-bootstrap" = templatefile(local._tpl_providers, {
@@ -44,47 +49,110 @@ locals {
       name          = "bootstrap"
       sa            = module.automation-tf-bootstrap-sa.email
     })
+    "0-bootstrap-r" = templatefile(local._tpl_providers, {
+      backend_extra = null
+      bucket        = module.automation-tf-bootstrap-gcs.name
+      name          = "bootstrap"
+      sa            = module.automation-tf-bootstrap-r-sa.email
+    })
     "1-resman" = templatefile(local._tpl_providers, {
       backend_extra = null
       bucket        = module.automation-tf-resman-gcs.name
       name          = "resman"
       sa            = module.automation-tf-resman-sa.email
     })
-    "0-bootstrap-tenant" = templatefile(local._tpl_providers, {
-      backend_extra = join("\n", [
-        "# remove the newline between quotes and set the tenant name as prefix",
-        "prefix = \"",
-        "\""
-      ])
-      bucket = module.automation-tf-resman-gcs.name
-      name   = "bootstrap-tenant"
-      sa     = module.automation-tf-resman-sa.email
+    "1-resman-r" = templatefile(local._tpl_providers, {
+      backend_extra = null
+      bucket        = module.automation-tf-resman-gcs.name
+      name          = "resman"
+      sa            = module.automation-tf-resman-r-sa.email
+    })
+    "1-tenant-factory" = templatefile(local._tpl_providers, {
+      backend_extra = "prefix = \"tenant-factory\""
+      bucket        = module.automation-tf-resman-gcs.name
+      name          = "tenant-factory"
+      sa            = module.automation-tf-resman-sa.email
+    })
+    "1-tenant-factory-r" = templatefile(local._tpl_providers, {
+      backend_extra = "prefix = \"tenant-factory\""
+      bucket        = module.automation-tf-resman-gcs.name
+      name          = "tenant-factory"
+      sa            = module.automation-tf-resman-r-sa.email
+    })
+    "1-vpcsc" = templatefile(local._tpl_providers, {
+      backend_extra = "prefix = \"vpcsc\""
+      bucket        = module.automation-tf-vpcsc-gcs.name
+      name          = "vpcsc"
+      sa            = module.automation-tf-vpcsc-sa.email
+    })
+    "1-vpcsc-r" = templatefile(local._tpl_providers, {
+      backend_extra = "prefix = \"vpcsc\""
+      bucket        = module.automation-tf-vpcsc-gcs.name
+      name          = "vpcsc"
+      sa            = module.automation-tf-vpcsc-r-sa.email
     })
   }
   tfvars = {
     automation = {
       federated_identity_pool = try(
-        google_iam_workload_identity_pool.default.0.name, null
+        google_iam_workload_identity_pool.default[0].name, null
       )
       federated_identity_providers = local.cicd_providers
       outputs_bucket               = module.automation-tf-output-gcs.name
       project_id                   = module.automation-project.project_id
       project_number               = module.automation-project.number
+      service_accounts = {
+        bootstrap   = module.automation-tf-bootstrap-sa.email
+        bootstrap-r = module.automation-tf-bootstrap-r-sa.email
+        resman      = module.automation-tf-resman-sa.email
+        resman-r    = module.automation-tf-resman-r-sa.email
+        vpcsc       = module.automation-tf-vpcsc-sa.email
+        vpcsc-r     = module.automation-tf-vpcsc-r-sa.email
+      }
     }
-    custom_roles = local.custom_roles
+    billing = {
+      dataset        = try(module.billing-export-dataset[0].id, null)
+      project_id     = try(module.billing-export-project[0].project_id, null)
+      project_number = try(module.billing-export-project[0].number, null)
+    }
+    custom_roles = module.organization.custom_role_id
     logging = {
       project_id        = module.log-export-project.project_id
       project_number    = module.log-export-project.number
       writer_identities = module.organization.sink_writer_identities
+      destinations = {
+        bigquery = try(module.log-export-dataset[0].id, null)
+        logging  = { for k, v in module.log-export-logbucket : k => v.id }
+        pubsub   = { for k, v in module.log-export-pubsub : k => v.id }
+        storage  = try(module.log-export-gcs[0].id, null)
+      }
+    }
+    org_policy_tags = {
+      key_id = (
+        module.organization.tag_keys[var.org_policies_config.tag_name].id
+      )
+      key_name = var.org_policies_config.tag_name
+      values = {
+        for k, v in module.organization.tag_values :
+        split("/", k)[1] => v.id
+      }
     }
   }
   tfvars_globals = {
     billing_account = var.billing_account
-    fast_features   = var.fast_features
-    groups          = var.groups
-    locations       = var.locations
-    organization    = var.organization
-    prefix          = var.prefix
+    groups          = local.principals
+    environments = {
+      for k, v in var.environments : k => {
+        is_default = v.is_default
+        key        = k
+        name       = v.name
+        short_name = v.short_name != null ? v.short_name : k
+        tag_name   = v.tag_name != null ? v.tag_name : lower(v.name)
+      }
+    }
+    locations    = local.locations
+    organization = var.organization
+    prefix       = var.prefix
   }
 }
 
@@ -95,7 +163,7 @@ output "automation" {
 
 output "billing_dataset" {
   description = "BigQuery dataset prepared for billing export."
-  value       = try(module.billing-export-dataset.0.id, null)
+  value       = try(module.billing-export-dataset[0].id, null)
 }
 
 output "cicd_repositories" {
@@ -112,17 +180,7 @@ output "cicd_repositories" {
 
 output "custom_roles" {
   description = "Organization-level custom roles."
-  value       = local.custom_roles
-}
-
-output "federated_identity" {
-  description = "Workload Identity Federation pool and providers."
-  value = {
-    pool = try(
-      google_iam_workload_identity_pool.default.0.name, null
-    )
-    providers = local.cicd_providers
-  }
+  value       = module.organization.custom_role_id
 }
 
 output "outputs_bucket" {
@@ -134,7 +192,7 @@ output "project_ids" {
   description = "Projects created by this stage."
   value = {
     automation     = module.automation-project.project_id
-    billing-export = try(module.billing-export-project.0.project_id, null)
+    billing-export = try(module.billing-export-project[0].project_id, null)
     log-export     = module.log-export-project.project_id
   }
 }
@@ -160,4 +218,29 @@ output "tfvars" {
   description = "Terraform variable files for the following stages."
   sensitive   = true
   value       = local.tfvars
+}
+
+output "tfvars_globals" {
+  description = "Terraform Globals variable files for the following stages."
+  sensitive   = true
+  value       = local.tfvars_globals
+}
+
+output "workforce_identity_pool" {
+  description = "Workforce Identity Federation pool."
+  value = {
+    pool = try(
+      google_iam_workforce_pool.default[0].name, null
+    )
+  }
+}
+
+output "workload_identity_pool" {
+  description = "Workload Identity Federation pool and providers."
+  value = {
+    pool = try(
+      google_iam_workload_identity_pool.default[0].name, null
+    )
+    providers = local.cicd_providers
+  }
 }

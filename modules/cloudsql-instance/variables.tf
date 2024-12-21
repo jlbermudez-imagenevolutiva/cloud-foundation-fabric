@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,20 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-variable "allocated_ip_ranges" {
-  description = "(Optional)The name of the allocated ip range for the private ip CloudSQL instance. For example: \"google-managed-services-default\". If set, the instance ip will be created in the allocated range. The range name must comply with RFC 1035. Specifically, the name must be 1-63 characters long and match the regular expression a-z?."
-  type = object({
-    primary = optional(string)
-    replica = optional(string)
-  })
-  default  = {}
+variable "activation_policy" {
+  description = "This variable specifies when the instance should be active. Can be either ALWAYS, NEVER or ON_DEMAND. Default is ALWAYS."
+  type        = string
+  default     = "ALWAYS"
+  validation {
+    condition     = var.activation_policy == "NEVER" || var.activation_policy == "ON_DEMAND" || var.activation_policy == "ALWAYS"
+    error_message = "The variable activation_policy must be ALWAYS, NEVER or ON_DEMAND."
+  }
   nullable = false
-}
-variable "authorized_networks" {
-  description = "Map of NAME=>CIDR_RANGE to allow to connect to the database(s)."
-  type        = map(string)
-  default     = null
 }
 
 variable "availability_type" {
@@ -58,6 +53,25 @@ variable "backup_configuration" {
   }
 }
 
+variable "collation" {
+  description = "The name of server instance collation."
+  type        = string
+  default     = null
+}
+
+variable "connector_enforcement" {
+  description = "Specifies if connections must use Cloud SQL connectors."
+  type        = string
+  default     = null
+}
+
+variable "data_cache" {
+  description = "Enable data cache. Only used for Enterprise MYSQL and PostgreSQL."
+  type        = bool
+  nullable    = false
+  default     = false
+}
+
 variable "database_version" {
   description = "Database type and version to create."
   type        = string
@@ -69,10 +83,10 @@ variable "databases" {
   default     = null
 }
 
-variable "deletion_protection" {
-  description = "Allow terraform to delete instances."
-  type        = bool
-  default     = false
+variable "disk_autoresize_limit" {
+  description = "The maximum size to which storage capacity can be automatically increased. The default value is 0, which specifies that there is no limit."
+  type        = number
+  default     = 0
 }
 
 variable "disk_size" {
@@ -87,6 +101,12 @@ variable "disk_type" {
   default     = "PD_SSD"
 }
 
+variable "edition" {
+  description = "The edition of the instance, can be ENTERPRISE or ENTERPRISE_PLUS."
+  type        = string
+  default     = "ENTERPRISE"
+}
+
 variable "encryption_key_name" {
   description = "The full path to the encryption key used for the CMEK disk encryption of the primary instance."
   type        = string
@@ -99,10 +119,22 @@ variable "flags" {
   default     = null
 }
 
-variable "ipv4_enabled" {
-  description = "Add a public IP address to database instance."
+variable "gcp_deletion_protection" {
+  description = "Set Google's deletion protection attribute which applies across all surfaces (UI, API, & Terraform)."
   type        = bool
-  default     = false
+  default     = true
+  nullable    = false
+}
+
+variable "insights_config" {
+  description = "Query Insights configuration. Defaults to null which disables Query Insights."
+  type = object({
+    query_string_length     = optional(number, 1024)
+    record_application_tags = optional(bool, false)
+    record_client_address   = optional(bool, false)
+    query_plans_per_minute  = optional(number, 5)
+  })
+  default = null
 }
 
 variable "labels" {
@@ -111,20 +143,79 @@ variable "labels" {
   default     = null
 }
 
+variable "maintenance_config" {
+  description = "Set maintenance window configuration and maintenance deny period (up to 90 days). Date format: 'yyyy-mm-dd'."
+  type = object({
+    maintenance_window = optional(object({
+      day          = number
+      hour         = number
+      update_track = optional(string, null)
+    }), null)
+    deny_maintenance_period = optional(object({
+      start_date = string
+      end_date   = string
+      start_time = optional(string, "00:00:00")
+    }), null)
+  })
+  default = {}
+  validation {
+    condition = (
+      try(var.maintenance_config.maintenance_window, null) == null ? true : (
+        # Maintenance window day validation below
+        var.maintenance_config.maintenance_window.day >= 1 &&
+        var.maintenance_config.maintenance_window.day <= 7 &&
+        # Maintenance window hour validation below
+        var.maintenance_config.maintenance_window.hour >= 0 &&
+        var.maintenance_config.maintenance_window.hour <= 23 &&
+        # Maintenance window update_track validation below
+        try(var.maintenance_config.maintenance_window.update_track, null) == null ? true :
+        contains(["canary", "stable"], var.maintenance_config.maintenance_window.update_track)
+      )
+    )
+    error_message = "Maintenance window day must be between 1 and 7, maintenance window hour must be between 0 and 23 and maintenance window update_track must be 'stable' or 'canary'."
+  }
+}
+
 variable "name" {
   description = "Name of primary instance."
   type        = string
 }
 
-variable "network" {
-  description = "VPC self link where the instances will be deployed. Private Service Networking must be enabled and configured in this VPC."
-  type        = string
+variable "network_config" {
+  description = "Network configuration for the instance. Only one between private_network and psc_config can be used."
+  type = object({
+    authorized_networks = optional(map(string))
+    connectivity = object({
+      public_ipv4 = optional(bool, false)
+      psa_config = optional(object({
+        private_network = string
+        allocated_ip_ranges = optional(object({
+          primary = optional(string)
+          replica = optional(string)
+        }))
+      }))
+      psc_allowed_consumer_projects    = optional(list(string))
+      enable_private_path_for_services = optional(bool, false)
+    })
+  })
+  validation {
+    condition     = (var.network_config.connectivity.psa_config != null ? 1 : 0) + (var.network_config.connectivity.psc_allowed_consumer_projects != null ? 1 : 0) < 2
+    error_message = "Only one between private network and psc can be specified."
+  }
 }
 
-variable "postgres_client_certificates" {
-  description = "Map of cert keys connect to the application(s) using public IP."
-  type        = list(string)
-  default     = null
+variable "password_validation_policy" {
+  description = "Password validation policy configuration for instances."
+  type = object({
+    enabled = optional(bool, true)
+    # change interval is only supported for postgresql
+    change_interval             = optional(number)
+    default_complexity          = optional(bool)
+    disallow_username_substring = optional(bool)
+    min_length                  = optional(number)
+    reuse_interval              = optional(number)
+  })
+  default = null
 }
 
 variable "prefix" {
@@ -151,9 +242,10 @@ variable "replicas" {
   description = "Map of NAME=> {REGION, KMS_KEY} for additional read replicas. Set to null to disable replica creation."
   type = map(object({
     region              = string
-    encryption_key_name = string
+    encryption_key_name = optional(string)
   }))
-  default = {}
+  default  = {}
+  nullable = false
 }
 
 variable "root_password" {
@@ -162,13 +254,44 @@ variable "root_password" {
   default     = null
 }
 
+variable "ssl" {
+  description = "Setting to enable SSL, set config and certificates."
+  type = object({
+    client_certificates = optional(list(string))
+    # More details @ https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/sql_database_instance#ssl_mode
+    ssl_mode = optional(string)
+  })
+  default  = {}
+  nullable = false
+  validation {
+    condition     = var.ssl.ssl_mode == null || var.ssl.ssl_mode == "ALLOW_UNENCRYPTED_AND_ENCRYPTED" || var.ssl.ssl_mode == "ENCRYPTED_ONLY" || var.ssl.ssl_mode == "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+    error_message = "The variable ssl_mode can be ALLOW_UNENCRYPTED_AND_ENCRYPTED, ENCRYPTED_ONLY for all, or TRUSTED_CLIENT_CERTIFICATE_REQUIRED for PostgreSQL or MySQL."
+  }
+}
+
+variable "terraform_deletion_protection" {
+  description = "Prevent terraform from deleting instances."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
 variable "tier" {
   description = "The machine type to use for the instances."
   type        = string
 }
 
-variable "users" {
-  description = "Map of users to create in the primary instance (and replicated to other replicas) in the format USER=>PASSWORD. For MySQL, anything afterr the first `@` (if persent) will be used as the user's host. Set PASSWORD to null if you want to get an autogenerated password."
-  type        = map(string)
+variable "time_zone" {
+  description = "The time_zone to be used by the database engine (supported only for SQL Server), in SQL Server timezone format."
+  type        = string
   default     = null
+}
+
+variable "users" {
+  description = "Map of users to create in the primary instance (and replicated to other replicas). For MySQL, anything after the first `@` (if present) will be used as the user's host. Set PASSWORD to null if you want to get an autogenerated password. The user types available are: 'BUILT_IN', 'CLOUD_IAM_USER' or 'CLOUD_IAM_SERVICE_ACCOUNT'."
+  type = map(object({
+    password = optional(string)
+    type     = optional(string)
+  }))
+  default = null
 }

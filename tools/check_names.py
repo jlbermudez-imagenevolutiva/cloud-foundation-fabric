@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ MOD_RE = re.compile('|'.join(f'(?:{pattern})' for _, pattern in MOD_TOKENS))
 MOD_LIMITS = {'project': 30, 'iam-service-account': 30, 'gcs': 63}
 
 Name = collections.namedtuple('Name', 'source name value length')
+Output = collections.namedtuple('Output', 'name length remaining flag')
 
 
 def get_names(dir_name):
@@ -71,8 +72,10 @@ def get_names(dir_name):
 
 @click.command()
 @click.argument('dirs', type=str, nargs=-1)
-@click.option('--prefix-length', default=7, type=int)
-def main(dirs, prefix_length=None):
+# max len(f'{fast prefix max length = 9}-{tenant prefix}') = 11
+@click.option('--prefix-length', default=11, type=int)
+@click.option('--failed-only', is_flag=True, default=False)
+def main(dirs, prefix_length=None, failed_only=False):
   'Parse names in dirs.'
   import json
   logging.basicConfig(level=logging.INFO)
@@ -85,20 +88,30 @@ def main(dirs, prefix_length=None):
   name_just = max(len(n.name) for n in names)
   value_just = max(len(n.value) for n in names)
   errors = []
+  output = []
   for name in names:
     name_length = name.length + prefix_length
-    if name_length >= MOD_LIMITS[name.source]:
-      flag = "✗"
+    remaining = MOD_LIMITS[name.source] - name_length
+    if remaining <= 0:
+      output.append(Output(name, name_length, remaining, "✗"))
       errors += [f"{name.source}:{name.name}:{name_length}"]
     else:
-      flag = "✓"
+      output.append(Output(name, name_length, remaining, "✓"))
 
-    print(f"[{flag}] {name.source.ljust(source_just)} "
-          f"{name.name.ljust(name_just)} "
-          f"{name.value.ljust(value_just)} "
-          f"({name_length})")
-  if errors:
-    raise ValueError(errors)
+  output.sort(key=lambda i: i.remaining, reverse=True)
+  if failed_only:
+    output = [i for i in output if i.flag == "✗"]
+  print(f'    {"source".ljust(source_just)} '
+        f'{"name".ljust(name_just)} '
+        f'{"value".ljust(value_just)} '
+        'length  remaining')
+  for i in output:
+    print(f"[{i.flag}] {i.name.source.ljust(source_just)} "
+          f"{i.name.name.ljust(name_just)} "
+          f"{i.name.value.ljust(value_just)} "
+          f" {i.length}/{MOD_LIMITS[i.name.source]} "
+          f"{str(i.remaining).rjust(10)}")
+  return 0 if not errors else 1
 
 
 if __name__ == '__main__':

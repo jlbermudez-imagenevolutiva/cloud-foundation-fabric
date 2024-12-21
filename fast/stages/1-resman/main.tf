@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,70 +15,65 @@
  */
 
 locals {
-  # convenience flags that express where billing account resides
-  automation_resman_sa = try(
-    data.google_client_openid_userinfo.provider_identity.0.email, null
-  )
-  automation_resman_sa_iam = (
-    local.automation_resman_sa == null
-    ? []
-    : ["serviceAccount:${local.automation_resman_sa}"]
-  )
-  branch_optional_sa_lists = {
-    dp-dev   = compact([try(module.branch-dp-dev-sa.0.iam_email, "")])
-    dp-prod  = compact([try(module.branch-dp-prod-sa.0.iam_email, "")])
-    gke-dev  = compact([try(module.branch-gke-dev-sa.0.iam_email, "")])
-    gke-prod = compact([try(module.branch-gke-prod-sa.0.iam_email, "")])
-    pf-dev   = compact([try(module.branch-pf-dev-sa.0.iam_email, "")])
-    pf-prod  = compact([try(module.branch-pf-prod-sa.0.iam_email, "")])
-  }
-  cicd_repositories = {
-    for k, v in coalesce(var.cicd_repositories, {}) : k => v
-    if(
-      v != null &&
-      (
-        try(v.type, null) == "sourcerepo"
-        ||
-        contains(
-          keys(local.identity_providers),
-          coalesce(try(v.identity_provider, null), ":")
-        )
-      ) &&
-      fileexists("${path.module}/templates/workflow-${try(v.type, "")}.yaml")
-    )
-  }
-  cicd_workflow_var_files = {
-    stage_2 = [
-      "0-bootstrap.auto.tfvars.json",
-      "1-resman.auto.tfvars.json",
-      "globals.auto.tfvars.json"
-    ]
-    stage_3 = [
-      "0-bootstrap.auto.tfvars.json",
-      "1-resman.auto.tfvars.json",
-      "globals.auto.tfvars.json",
-      "2-networking.auto.tfvars.json",
-      "2-security.auto.tfvars.json"
-    ]
-  }
-  custom_roles = coalesce(var.custom_roles, {})
-  gcs_storage_class = (
-    length(split("-", var.locations.gcs)) < 2
-    ? "MULTI_REGIONAL"
-    : "REGIONAL"
-  )
-  groups = {
-    for k, v in var.groups :
-    k => can(regex(".*@.*", v)) ? v : "${v}@${var.organization.domain}"
-  }
-  groups_iam = {
-    for k, v in local.groups : k => v != null ? "group:${v}" : null
-  }
+  # leaving this here to document how to get self identity in a stage
+  # automation_resman_sa = try(
+  #   data.google_client_openid_userinfo.provider_identity[0].email, null
+  # )
+  # tag values use descriptive names
   identity_providers = coalesce(
     try(var.automation.federated_identity_providers, null), {}
   )
+  principals = {
+    for k, v in var.groups : k => (
+      can(regex("^[a-zA-Z]+:", v))
+      ? v
+      : "group:${v}@${var.organization.domain}"
+    )
+  }
+  root_node = (
+    var.root_node == null
+    ? "organizations/${var.organization.id}"
+    : var.root_node
+  )
+  stage_service_accounts = merge(
+    !var.fast_stage_2.networking.enabled ? {} : {
+      networking   = module.net-sa-rw[0].email
+      networking-r = module.net-sa-ro[0].email
+    },
+    !var.fast_stage_2.security.enabled ? {} : {
+      security   = module.sec-sa-rw[0].email
+      security-r = module.sec-sa-ro[0].email
+    },
+    !var.fast_stage_2.project_factory.enabled ? {} : {
+      project-factory   = module.pf-sa-rw[0].email
+      project-factory-r = module.pf-sa-ro[0].email
+    },
+    { for k, v in local.stage3 : k => module.stage3-sa-rw[k].email },
+    { for k, v in local.stage3 : "${k}-r" => module.stage3-sa-ro[k].email },
+  )
+  tag_keys = (
+    var.root_node == null
+    ? module.organization[0].tag_keys
+    : module.automation-project[0].tag_keys
+  )
+  tag_root = (
+    var.root_node == null
+    ? var.organization.id
+    : var.automation.project_id
+  )
+  tag_values = (
+    var.root_node == null
+    ? module.organization[0].tag_values
+    : module.automation-project[0].tag_values
+  )
+  top_level_folder_ids = {
+    for k, v in module.top-level-folder : k => v.id
+  }
+  top_level_service_accounts = {
+    for k, v in module.top-level-sa : k => try(v.email)
+  }
 }
 
-data "google_client_openid_userinfo" "provider_identity" {
-  count = length(local.cicd_repositories) > 0 ? 1 : 0
-}
+# data "google_client_openid_userinfo" "provider_identity" {
+#   count = length(local.cicd_repositories) > 0 ? 1 : 0
+# }

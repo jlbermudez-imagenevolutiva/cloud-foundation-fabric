@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -73,9 +73,6 @@ module "project" {
     "compute.googleapis.com",
     "secretmanager.googleapis.com",
   ]
-
-  iam          = {}
-  iam_additive = {}
   shared_vpc_service_config = var.shared_vpc_project_id == null ? null : {
     attach       = true
     host_project = var.shared_vpc_project_id

@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,14 +17,16 @@
 output "bigquery-datasets" {
   description = "BigQuery datasets."
   value = {
-    curated = module.cur-bq-0.dataset_id,
+    curated = module.cur-bq-0.dataset_id
+    landing = module.land-bq-0.dataset_id
   }
 }
 
 output "composer" {
   description = "Composer variables."
   value = {
-    air_flow_uri = try(google_composer_environment.processing-cmp-0[0].config.0.airflow_uri, null)
+    air_flow_uri = try(google_composer_environment.processing-cmp-0[0].config[0].airflow_uri, null)
+    dag_bucket   = try(regex("^gs://([^/]*)/dags$", google_composer_environment.processing-cmp-0[0].config[0].dag_gcs_prefix)[0], null)
   }
 }
 
@@ -36,10 +38,9 @@ output "dataproc-history-server" {
 output "gcs_buckets" {
   description = "GCS buckets."
   value = {
-    landing_cs_0    = module.land-cs-0.name,
-    processing_cs_0 = module.processing-cs-0.name,
-    cur_cs_0        = module.cur-cs-0.name,
-    composer        = try(google_composer_environment.processing-cmp-0[0].config[0].dag_gcs_prefix, null)
+    curated    = module.cur-cs-0.name
+    landing    = module.land-cs-0.name
+    processing = module.processing-cs-0.name
   }
 }
 
@@ -48,20 +49,28 @@ output "kms_keys" {
   value       = var.service_encryption_keys
 }
 
+output "network" {
+  description = "VPC network."
+  value = {
+    processing_subnet = local.processing_subnet
+    processing_vpc    = local.processing_vpc
+  }
+}
+
 output "projects" {
-  description = "GCP Projects informations."
+  description = "GCP Projects information."
   value = {
     project_number = {
-      landing    = module.land-project.number,
-      common     = module.common-project.number,
-      curated    = module.cur-project.number,
-      processing = module.processing-project.number,
+      common     = module.common-project.number
+      curated    = module.cur-project.number
+      landing    = module.land-project.number
+      processing = module.processing-project.number
     }
     project_id = {
-      landing    = module.land-project.project_id,
-      common     = module.common-project.project_id,
-      curated    = module.cur-project.project_id,
-      processing = module.processing-project.project_id,
+      common     = module.common-project.project_id
+      curated    = module.cur-project.project_id
+      landing    = module.land-project.project_id
+      processing = module.processing-project.project_id
     }
   }
 }
@@ -69,24 +78,9 @@ output "projects" {
 output "service_accounts" {
   description = "Service account created."
   value = {
-    landing    = module.land-sa-cs-0.email
-    processing = module.processing-sa-0.email
     composer   = module.processing-sa-cmp-0.email
-  }
-}
-
-output "vpc_network" {
-  description = "VPC network."
-  value = {
-    processing_transformation = local.processing_vpc
-    processing_composer       = local.processing_vpc
-  }
-}
-
-output "vpc_subnet" {
-  description = "VPC subnetworks."
-  value = {
-    processing_transformation = local.processing_subnet
-    processing_composer       = local.processing_subnet
+    curated    = module.cur-sa-0.email,
+    landing    = module.land-sa-0.email,
+    processing = module.processing-sa-0.email,
   }
 }

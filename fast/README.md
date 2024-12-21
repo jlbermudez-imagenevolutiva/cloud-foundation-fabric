@@ -14,17 +14,17 @@ Fabric FAST was initially conceived to help enterprises quickly set up a GCP org
 
 FAST uses the concept of stages, which individually perform precise tasks but taken together build a functional, ready-to-use GCP organization. More importantly, stages are modeled around the security boundaries that typically appear in mature organizations. This arrangement allows delegating ownership of each stage to the team responsible for the types of resources it manages. For example, as its name suggests, the networking stage sets up all the networking elements and is usually the responsibility of a dedicated networking team within the organization.
 
-From the perspective of FAST's overall design, stages also work as contacts or interfaces, defining a set of pre-requisites and inputs required to perform their designed task and generating outputs needed by other stages lower in the chain. The diagram below shows the relationships between stages.
+From the perspective of FAST's overall design, stages also work as contracts or interfaces, defining a set of pre-requisites and inputs required to perform their designed task and generating outputs needed by other stages lower in the chain. The diagram below shows the relationships between stages.
 
 <p align="center">
   <img src="stages.svg" alt="Stages diagram">
 </p>
 
-Please refer to the [stages](./stages/) section for further details on each stage. For details on tenant-level stages which introduce a deeper level of autonomy via nested FAST setups rooted in a top-level folder, refer to the [multitenant stages](#multitenant-organizations) section below.
+Please refer to the [stages](./stages/) section for further details on each stage. For details on tenant-level stages which introduce a deeper level of autonomy via nested FAST setups rooted in a top-level folder, refer to the [multitenant](#multitenant-organizations) section below.
 
 ### Security-first design
 
-Security was, from the beginning, one of the most critical elements in the design of Fabric FAST. Many of FAST's design decisions aim to build the foundations of a secure organization. In fact, the first two stages deal mainly with the organization-wide security setup.
+Security was, from the beginning, one of the most critical elements in the design of Fabric FAST. Many of FAST's design decisions aim to build the foundations of a secure organization. In fact, the first stage deals mainly with the organization-wide security setup, and the second stage partitions the organization hierarchy and puts guardrails in place for each hierarchy branch.
 
 FAST also aims to minimize the number of permissions granted to principals according to the security-first approach previously mentioned. We achieve this through the meticulous use of groups, service accounts, custom roles, and [Cloud IAM Conditions](https://cloud.google.com/iam/docs/conditions-overview), among other things.
 
@@ -32,7 +32,7 @@ FAST also aims to minimize the number of permissions granted to principals accor
 
 A resource factory consumes a simple representation of a resource (e.g., in YAML) and deploys it (e.g., using Terraform). Used correctly, factories can help decrease the management overhead of large-scale infrastructure deployments. See "[Resource Factories: A descriptive approach to Terraform](https://medium.com/google-cloud/resource-factories-a-descriptive-approach-to-terraform-581b3ebb59c)" for more details and the rationale behind factories.
 
-FAST uses YAML-based factories to deploy subnets and firewall rules and, as its name suggests, in the [project factory](./stages/3-project-factory/) stage.
+FAST uses YAML-based factories to deploy subnets and firewall rules and, as its name suggests, in the [project factory](./stages/2-project-factory/) stage.
 
 ### CI/CD
 
@@ -40,12 +40,12 @@ One of our objectives with FAST is to provide a lightweight reference design for
 
 ### Multitenant organizations
 
-FAST has built-in support for complex multitenant organizations, where each tenant has complete control over a separate hierarchy rooted in a top-level folder. This approach is particularly suited for large enterprises or governments, where country-level subsidiaries or government agencies have a wide degree of autonomy within a shared GCP organization managed by a central entity.
+FAST has built-in support for multitenancy implemented in [an optional stage 1](./stages/1-tenant-factory/). Tenants can optionally be created with FAST compatibility, allowing them independent use of stages 1+ in their own context.
 
-FAST implements multitenancy via [dedicated stages](stages-multitenant) for tenant-level bootstrap and resource management, which configure separate hierarchies within the organization rooted in top-level folders, so that subsequent FAST stages (networking, security, data, etc.) can be used directly for each tenant. The diagram below shows the relationships between organization-level and tenant-level stages.
+The following diagram is a high-level overview of stages used with multitenancy.
 
 <p align="center">
-  <img src="stages-multitenant/stages.svg" alt="Stages diagram">
+  <img src="tenants-stages.svg" alt="Stages for multitenancy.">
 </p>
 
 ## Implementation

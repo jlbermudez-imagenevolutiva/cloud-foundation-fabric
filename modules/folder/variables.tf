@@ -14,6 +14,59 @@
  * limitations under the License.
  */
 
+variable "assured_workload_config" {
+  description = "Create AssuredWorkloads folder instead of regular folder when value is provided. Incompatible with folder_create=false."
+  type = object({
+    compliance_regime         = string
+    display_name              = string
+    location                  = string
+    organization              = string
+    enable_sovereign_controls = optional(bool)
+    labels                    = optional(map(string), {})
+    partner                   = optional(string)
+    partner_permissions = optional(object({
+      assured_workloads_monitoring = optional(bool)
+      data_logs_viewer             = optional(bool)
+      service_access_approver      = optional(bool)
+    }))
+    violation_notifications_enabled = optional(bool)
+
+  })
+  default = null
+  validation {
+    condition = try(contains([
+      "ASSURED_WORKLOADS_FOR_PARTNERS",
+      "AU_REGIONS_AND_US_SUPPORT",
+      "CA_PROTECTED_B, IL5",
+      "CA_REGIONS_AND_SUPPORT",
+      "CJIS",
+      "COMPLIANCE_REGIME_UNSPECIFIED",
+      "EU_REGIONS_AND_SUPPORT",
+      "FEDRAMP_HIGH",
+      "FEDRAMP_MODERATE",
+      "HIPAA, HITRUST",
+      "IL2",
+      "IL4",
+      "ISR_REGIONS_AND_SUPPORT",
+      "ISR_REGIONS",
+      "ITAR",
+      "JP_REGIONS_AND_SUPPORT",
+      "US_REGIONAL_ACCESS"
+    ], var.assured_workload_config.compliance_regime), true)
+    error_message = "Field assured_workload_config.compliance_regime must be one of the values listed in https://cloud.google.com/assured-workloads/docs/reference/rest/Shared.Types/ComplianceRegime"
+  }
+  validation {
+    condition = try(contains([
+      "LOCAL_CONTROLS_BY_S3NS",
+      "PARTNER_UNSPECIFIED",
+      "SOVEREIGN_CONTROLS_BY_PSN",
+      "SOVEREIGN_CONTROLS_BY_SIA_MINSAIT",
+      "SOVEREIGN_CONTROLS_BY_T_SYSTEMS"
+    ], var.assured_workload_config.partner), true)
+    error_message = "Field assured_workload_config.partner must be one of the values listed in https://cloud.google.com/assured-workloads/docs/reference/rest/Shared.Types/Partner"
+  }
+}
+
 variable "contacts" {
   description = "List of essential contacts for this resource. Must be in the form EMAIL -> [NOTIFICATION_TYPES]. Valid notification types are ALL, SUSPENSION, SECURITY, TECHNICAL, BILLING, LEGAL, PRODUCT_UPDATES."
   type        = map(list(string))
@@ -21,36 +74,26 @@ variable "contacts" {
   nullable    = false
 }
 
-variable "firewall_policies" {
-  description = "Hierarchical firewall policies created in this folder."
-  type = map(map(object({
-    action                  = string
-    description             = string
-    direction               = string
-    logging                 = bool
-    ports                   = map(list(string))
-    priority                = number
-    ranges                  = list(string)
-    target_resources        = list(string)
-    target_service_accounts = list(string)
-  })))
-  default  = {}
-  nullable = false
+variable "deletion_protection" {
+  description = "Deletion protection setting for this folder."
+  type        = bool
+  default     = false
 }
 
-variable "firewall_policy_association" {
-  description = "The hierarchical firewall policy to associate to this folder. Must be either a key in the `firewall_policies` map or the id of a policy defined somewhere else."
-  type        = map(string)
-  default     = {}
-  nullable    = false
-}
-
-variable "firewall_policy_factory" {
-  description = "Configuration for the firewall policy factory."
+variable "factories_config" {
+  description = "Paths to data files and folders that enable factory functionality."
   type = object({
-    cidr_file   = string
-    policy_name = string
-    rules_file  = string
+    org_policies = optional(string)
+  })
+  nullable = false
+  default  = {}
+}
+
+variable "firewall_policy" {
+  description = "Hierarchical firewall policy to associate to this folder."
+  type = object({
+    name   = string
+    policy = string
   })
   default = null
 }
@@ -61,75 +104,10 @@ variable "folder_create" {
   default     = true
 }
 
-variable "group_iam" {
-  description = "Authoritative IAM binding for organization groups, in {GROUP_EMAIL => [ROLES]} format. Group emails need to be static. Can be used in combination with the `iam` variable."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
-variable "iam" {
-  description = "IAM bindings in {ROLE => [MEMBERS]} format."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
-variable "iam_additive" {
-  description = "Non authoritative IAM bindings, in {ROLE => [MEMBERS]} format."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
-variable "iam_additive_members" {
-  description = "IAM additive bindings in {MEMBERS => [ROLE]} format. This might break if members are dynamic values."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
 variable "id" {
   description = "Folder ID in case you use folder_create=false."
   type        = string
   default     = null
-}
-
-variable "logging_exclusions" {
-  description = "Logging exclusions for this folder in the form {NAME -> FILTER}."
-  type        = map(string)
-  default     = {}
-  nullable    = false
-}
-
-variable "logging_sinks" {
-  description = "Logging sinks to create for the organization."
-  type = map(object({
-    bq_partitioned_table = optional(bool)
-    description          = optional(string)
-    destination          = string
-    disabled             = optional(bool, false)
-    exclusions           = optional(map(string), {})
-    filter               = string
-    include_children     = optional(bool, true)
-    type                 = string
-  }))
-  default  = {}
-  nullable = false
-  validation {
-    condition = alltrue([
-      for k, v in var.logging_sinks :
-      contains(["bigquery", "logging", "pubsub", "storage"], v.type)
-    ])
-    error_message = "Type must be one of 'bigquery', 'logging', 'pubsub', 'storage'."
-  }
-  validation {
-    condition = alltrue([
-      for k, v in var.logging_sinks :
-      v.bq_partitioned_table != true || v.type == "bigquery"
-    ])
-    error_message = "Can only set bq_partitioned_table when type is `bigquery`."
-  }
 }
 
 variable "name" {
@@ -163,12 +141,6 @@ variable "org_policies" {
   }))
   default  = {}
   nullable = false
-}
-
-variable "org_policies_data_path" {
-  description = "Path containing org policies in YAML format."
-  type        = string
-  default     = null
 }
 
 variable "parent" {

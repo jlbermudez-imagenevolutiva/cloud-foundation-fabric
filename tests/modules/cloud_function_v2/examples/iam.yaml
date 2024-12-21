@@ -13,17 +13,24 @@
 # limitations under the License.
 
 values:
-  module.cf-http.google_cloudfunctions2_function_iam_binding.default["roles/cloudfunctions.invoker"]:
-    cloud_function: test-cf-http
+  module.cf-http.google_cloud_run_service_iam_binding.invoker[0]:
     condition: []
-    location: europe-west1
+    location: europe-west8
     members:
     - allUsers
-    project: my-project
-    role: roles/cloudfunctions.invoker
+    project: project-id
+    role: roles/run.invoker
+    service: test-cf-http
+  module.cf-http.google_cloudfunctions2_function.function: {}
+  module.cf-http.google_storage_bucket_object.bundle[0]:
+    bucket: bucket
+    customer_encryption: []
+    detect_md5hash: different hash
+    source: /tmp/bundle-project-id-test-cf-http.zip
 
 counts:
+  google_cloud_run_service_iam_binding: 1
   google_cloudfunctions2_function: 1
   google_storage_bucket_object: 1
   modules: 1
-  resources: 3
+  resources: 6

@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,11 +19,13 @@ variable "composer_config" {
   type = object({
     environment_size = optional(string, "ENVIRONMENT_SIZE_SMALL")
     software_config = optional(object({
-      airflow_config_overrides = optional(map(string), {})
-      pypi_packages            = optional(map(string), {})
-      env_variables            = optional(map(string), {})
-      image_version            = optional(string, "composer-2-airflow-2")
+      airflow_config_overrides       = optional(map(string), {})
+      pypi_packages                  = optional(map(string), {})
+      env_variables                  = optional(map(string), {})
+      image_version                  = optional(string, "composer-2-airflow-2")
+      cloud_data_lineage_integration = optional(bool, true)
     }), {})
+    web_server_access_control = optional(map(string), {})
     workloads_config = optional(object({
       scheduler = optional(object({
         cpu        = optional(number, 0.5)
@@ -53,19 +55,23 @@ variable "composer_config" {
 
 variable "data_catalog_tags" {
   description = "List of Data Catalog Policy tags to be created with optional IAM binging configuration in {tag => {ROLE => [MEMBERS]}} format."
-  type        = map(map(list(string)))
-  nullable    = false
+  type = map(object({
+    description = optional(string)
+    iam         = optional(map(list(string)), {})
+  }))
+  nullable = false
   default = {
-    "3_Confidential" = null
-    "2_Private"      = null
-    "1_Sensitive"    = null
+    "3_Confidential" = {}
+    "2_Private"      = {}
+    "1_Sensitive"    = {}
   }
 }
 
-variable "data_force_destroy" {
-  description = "Flag to set 'force_destroy' on data services like BiguQery or Cloud Storage."
+variable "deletion_protection" {
+  description = "Prevent Terraform from destroying data storage resources (storage buckets, GKE clusters, CloudSQL instances) in this blueprint. When this field is set in Terraform state, a terraform destroy or terraform apply that would delete data storage resources will fail."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "enable_services" {
@@ -98,10 +104,7 @@ variable "network_config" {
   type = object({
     host_project      = optional(string)
     network_self_link = optional(string)
-    subnet_self_links = optional(object({
-      processing_transformation = string
-      processing_composer       = string
-    }), null)
+    subnet_self_link  = optional(string)
     composer_ip_ranges = optional(object({
       connection_subnetwork = optional(string)
       cloud_sql             = optional(string, "10.20.10.0/24")
@@ -109,7 +112,6 @@ variable "network_config" {
       pods_range_name       = optional(string, "pods")
       services_range_name   = optional(string, "services")
     }), {})
-    # web_server_network_access_control = list(string)
   })
   nullable = false
   default  = {}

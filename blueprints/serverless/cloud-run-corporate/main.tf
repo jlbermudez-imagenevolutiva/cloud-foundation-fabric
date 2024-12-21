@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,6 @@ module "project_main" {
     "cloudresourcemanager.googleapis.com",
     "accesscontextmanager.googleapis.com"
   ]
-  skip_delete = true
 }
 
 # Simulated onprem environment
@@ -75,7 +74,6 @@ module "project_onprem" {
     "compute.googleapis.com",
     "dns.googleapis.com"
   ]
-  skip_delete = true
 }
 
 # Project 1
@@ -90,7 +88,6 @@ module "project_prj1" {
     "compute.googleapis.com",
     "dns.googleapis.com"
   ]
-  skip_delete = true
 }
 
 # Service Project 1
@@ -103,7 +100,7 @@ module "project_svc1" {
   parent          = try(var.prj_svc1_create.parent, null)
   shared_vpc_service_config = {
     host_project = module.project_main.project_id
-    service_identity_iam = {
+    service_agent_iam = {
       "roles/compute.networkUser" = [
         "vpcaccess"
       ],
@@ -118,7 +115,6 @@ module "project_svc1" {
     "run.googleapis.com",
     "vpcaccess.googleapis.com"
   ]
-  skip_delete = true
 }
 
 ###############################################################################
@@ -349,7 +345,7 @@ resource "google_compute_global_forwarding_rule" "psc_endpoint_prj1" {
 ###############################################################################
 
 module "ilb-l7" {
-  source     = "../../../modules/net-ilb-l7"
+  source     = "../../../modules/net-lb-app-int"
   count      = var.custom_domain == null ? 0 : 1
   project_id = module.project_main.project_id
   name       = "ilb-l7-cr"
@@ -490,51 +486,63 @@ module "vm_test_svc1" {
 ###############################################################################
 
 module "private_dns_main" {
-  source          = "../../../modules/dns"
-  project_id      = module.project_main.project_id
-  type            = "private"
-  name            = "dns-main"
-  client_networks = [module.vpc_main.self_link]
-  domain          = local.cloud_run_domain
+  source     = "../../../modules/dns"
+  project_id = module.project_main.project_id
+  name       = "dns-main"
+  zone_config = {
+    domain = local.cloud_run_domain
+    private = {
+      client_networks = [module.vpc_main.self_link]
+    }
+  }
   recordsets = {
     "A *" = { records = [module.psc_addr_main.psc_addresses["psc-addr"].address] }
   }
 }
 
 module "private_dns_main_custom" {
-  source          = "../../../modules/dns"
-  count           = var.custom_domain == null ? 0 : 1
-  project_id      = module.project_main.project_id
-  type            = "private"
-  name            = "dns-main-custom"
-  client_networks = [module.vpc_main.self_link]
-  domain          = format("%s.", var.custom_domain)
+  source     = "../../../modules/dns"
+  count      = var.custom_domain == null ? 0 : 1
+  project_id = module.project_main.project_id
+  name       = "dns-main-custom"
+  zone_config = {
+    domain = format("%s.", var.custom_domain)
+    private = {
+      client_networks = [module.vpc_main.self_link]
+    }
+  }
   recordsets = {
     "A " = { records = [module.ilb-l7[0].address] }
   }
 }
 
 module "private_dns_onprem" {
-  source          = "../../../modules/dns"
-  count           = length(module.project_onprem)
-  project_id      = module.project_onprem[0].project_id
-  type            = "private"
-  name            = "dns-onprem"
-  client_networks = [module.vpc_onprem[0].self_link]
-  domain          = local.cloud_run_domain
+  source     = "../../../modules/dns"
+  count      = length(module.project_onprem)
+  project_id = module.project_onprem[0].project_id
+  name       = "dns-onprem"
+  zone_config = {
+    domain = local.cloud_run_domain
+    private = {
+      client_networks = [module.vpc_onprem[0].self_link]
+    }
+  }
   recordsets = {
     "A *" = { records = [module.psc_addr_main.psc_addresses["psc-addr"].address] }
   }
 }
 
 module "private_dns_prj1" {
-  source          = "../../../modules/dns"
-  count           = length(module.project_prj1)
-  project_id      = module.project_prj1[0].project_id
-  type            = "private"
-  name            = "dns-prj1"
-  client_networks = [module.vpc_prj1[0].self_link]
-  domain          = local.cloud_run_domain
+  source     = "../../../modules/dns"
+  count      = length(module.project_prj1)
+  project_id = module.project_prj1[0].project_id
+  name       = "dns-prj1"
+  zone_config = {
+    domain = local.cloud_run_domain
+    private = {
+      client_networks = [module.vpc_prj1[0].self_link]
+    }
+  }
   recordsets = {
     "A *" = { records = [module.psc_addr_prj1[0].psc_addresses["psc-addr"].address] }
   }

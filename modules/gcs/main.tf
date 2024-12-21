@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 locals {
   prefix       = var.prefix == null ? "" : "${var.prefix}-"
   notification = try(var.notification_config.enabled, false)
+  topic_create = try(var.notification_config.create_topic, null) != null
 }
 
 resource "google_storage_bucket" "bucket" {
@@ -27,16 +28,41 @@ resource "google_storage_bucket" "bucket" {
   force_destroy               = var.force_destroy
   uniform_bucket_level_access = var.uniform_bucket_level_access
   labels                      = var.labels
-  versioning {
-    enabled = var.versioning
+  default_event_based_hold    = var.default_event_based_hold
+  enable_object_retention     = var.enable_object_retention
+  requester_pays              = var.requester_pays
+  public_access_prevention    = var.public_access_prevention
+  rpo                         = var.rpo
+
+  dynamic "versioning" {
+    for_each = var.versioning == null ? [] : [""]
+    content {
+      enabled = var.versioning
+    }
   }
 
-  dynamic "website" {
-    for_each = var.website == null ? [] : [""]
+  dynamic "autoclass" {
+    for_each = var.autoclass == null ? [] : [""]
+    content {
+      enabled = var.autoclass
+    }
+  }
+
+  dynamic "cors" {
+    for_each = var.cors == null ? [] : [""]
+    content {
+      origin          = var.cors.origin
+      method          = var.cors.method
+      response_header = var.cors.response_header
+      max_age_seconds = max(3600, var.cors.max_age_seconds)
+    }
+  }
+
+  dynamic "custom_placement_config" {
+    for_each = var.custom_placement_config == null ? [] : [""]
 
     content {
-      main_page_suffix = var.website.main_page_suffix
-      not_found_page   = var.website.not_found_page
+      data_locations = var.custom_placement_config
     }
   }
 
@@ -48,11 +74,11 @@ resource "google_storage_bucket" "bucket" {
     }
   }
 
-  dynamic "retention_policy" {
-    for_each = var.retention_policy == null ? [] : [""]
+  dynamic "hierarchical_namespace" {
+    for_each = var.enable_hierarchical_namespace == null ? [] : [""]
+
     content {
-      retention_period = var.retention_policy.retention_period
-      is_locked        = var.retention_policy.is_locked
+      enabled = var.enable_hierarchical_namespace
     }
   }
 
@@ -61,16 +87,6 @@ resource "google_storage_bucket" "bucket" {
     content {
       log_bucket        = var.logging_config.log_bucket
       log_object_prefix = var.logging_config.log_object_prefix
-    }
-  }
-
-  dynamic "cors" {
-    for_each = var.cors == null ? [] : [""]
-    content {
-      origin          = var.cors.origin
-      method          = var.cors.method
-      response_header = var.cors.response_header
-      max_age_seconds = max(3600, var.cors.max_age_seconds)
     }
   }
 
@@ -97,33 +113,84 @@ resource "google_storage_bucket" "bucket" {
       }
     }
   }
+
+  dynamic "retention_policy" {
+    for_each = var.retention_policy == null ? [] : [""]
+    content {
+      retention_period = var.retention_policy.retention_period
+      is_locked        = var.retention_policy.is_locked
+    }
+  }
+
+  dynamic "soft_delete_policy" {
+    for_each = var.soft_delete_retention == null ? [] : [""]
+    content {
+      retention_duration_seconds = var.soft_delete_retention
+    }
+  }
+
+  dynamic "website" {
+    for_each = var.website == null ? [] : [""]
+
+    content {
+      main_page_suffix = var.website.main_page_suffix
+      not_found_page   = var.website.not_found_page
+    }
+  }
 }
 
-resource "google_storage_bucket_iam_binding" "bindings" {
-  for_each = var.iam
-  bucket   = google_storage_bucket.bucket.name
-  role     = each.key
-  members  = each.value
+resource "google_storage_bucket_object" "objects" {
+  for_each = var.objects_to_upload
+
+  bucket              = google_storage_bucket.bucket.id
+  name                = each.value.name
+  metadata            = each.value.metadata
+  content             = each.value.content
+  source              = each.value.source
+  cache_control       = each.value.cache_control
+  content_disposition = each.value.content_disposition
+  content_encoding    = each.value.content_encoding
+  content_language    = each.value.content_language
+  content_type        = each.value.content_type
+  event_based_hold    = each.value.event_based_hold
+  temporary_hold      = each.value.temporary_hold
+  detect_md5hash      = each.value.detect_md5hash
+  storage_class       = each.value.storage_class
+  kms_key_name        = each.value.kms_key_name
+
+  dynamic "customer_encryption" {
+    for_each = each.value.customer_encryption == null ? [] : [""]
+
+    content {
+      encryption_algorithm = each.value.customer_encryption.encryption_algorithm
+      encryption_key       = each.value.customer_encryption.encryption_key
+    }
+  }
 }
 
 resource "google_storage_notification" "notification" {
-  count              = local.notification ? 1 : 0
-  bucket             = google_storage_bucket.bucket.name
-  payload_format     = var.notification_config.payload_format
-  topic              = google_pubsub_topic.topic[0].id
+  count          = local.notification ? 1 : 0
+  bucket         = google_storage_bucket.bucket.name
+  payload_format = var.notification_config.payload_format
+  topic = try(
+    google_pubsub_topic.topic[0].id, var.notification_config.topic_name
+  )
   custom_attributes  = var.notification_config.custom_attributes
   event_types        = var.notification_config.event_types
   object_name_prefix = var.notification_config.object_name_prefix
   depends_on         = [google_pubsub_topic_iam_binding.binding]
 }
+
 resource "google_pubsub_topic_iam_binding" "binding" {
-  count   = local.notification ? 1 : 0
+  count   = local.topic_create ? 1 : 0
   topic   = google_pubsub_topic.topic[0].id
   role    = "roles/pubsub.publisher"
   members = ["serviceAccount:${var.notification_config.sa_email}"]
 }
+
 resource "google_pubsub_topic" "topic" {
-  count   = local.notification ? 1 : 0
-  project = var.project_id
-  name    = var.notification_config.topic_name
+  count        = local.topic_create ? 1 : 0
+  project      = var.project_id
+  name         = var.notification_config.topic_name
+  kms_key_name = try(var.notification_config.topic_create.kms_key_id, null)
 }

@@ -62,8 +62,12 @@ variable "network" {
 variable "partner_interconnect_config" {
   description = "Partner interconnect configuration."
   type = object({
-    edge_availability_domain = optional(string, "AVAILABILITY_DOMAIN_ANY")
+    edge_availability_domain = string
   })
+  validation {
+    condition     = var.partner_interconnect_config == null ? true : contains(["AVAILABILITY_DOMAIN_1", "AVAILABILITY_DOMAIN_2", "AVAILABILITY_DOMAIN_ANY"], var.partner_interconnect_config.edge_availability_domain)
+    error_message = "The edge_availability_domain must have one of these values: AVAILABILITY_DOMAIN_1, AVAILABILITY_DOMAIN_2, AVAILABILITY_DOMAIN_ANY."
+  }
   default = null
 }
 
@@ -85,28 +89,26 @@ variable "region" {
 variable "router_config" {
   description = "Cloud Router configuration for the VPN. If you want to reuse an existing router, set create to false and use name to specify the desired router."
   type = object({
-    create    = optional(bool, true)
-    asn       = optional(number, 65001)
-    name      = optional(string, "router")
-    keepalive = optional(number)
+    create = optional(bool, true)
+    asn    = optional(number, 65001)
+    bfd = optional(object({
+      min_receive_interval        = optional(number)
+      min_transmit_interval       = optional(number)
+      multiplier                  = optional(number)
+      session_initialization_mode = optional(string, "ACTIVE")
+    }))
     custom_advertise = optional(object({
       all_subnets = bool
       ip_ranges   = map(string)
     }))
-    bfd = optional(object({
-      session_initialization_mode = optional(string, "ACTIVE")
-      min_receive_interval        = optional(number)
-      min_transmit_interval       = optional(number)
-      multiplier                  = optional(number)
+    md5_authentication_key = optional(object({
+      name = string
+      key  = optional(string)
     }))
+    keepalive = optional(number)
+    name      = optional(string, "router")
   })
   nullable = false
-}
-
-variable "vlan_tag" {
-  description = "The VLAN id to be used for this VLAN attachment."
-  type        = number
-  default     = null
 }
 
 variable "vpn_gateways_ip_range" {

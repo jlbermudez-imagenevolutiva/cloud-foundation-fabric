@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,15 +17,59 @@
 # tfdoc:file:description Organization policies.
 
 locals {
-  all_drs_domains = concat(
-    [var.organization.customer_id],
-    try(local.policy_configs.allowed_policy_member_domains, [])
+  # context tag values for enabled stage 2s (merged in the final map below)
+  _context_tag_values_stage2 = {
+    for k, v in var.fast_stage_2 :
+    k => replace(k, "_", "-") if v.enabled
+  }
+  # merge all context tag values into a single map
+  context_tag_values = merge(
+    # user-defined
+    try(local.tags["context"]["values"], {}),
+    # top-level folders
+    {
+      for k, v in local.top_level_folders : k => {
+        iam         = try(local.tags.context.values.iam[k], {})
+        description = try(local.tags.context.values.description[k], null)
+      } if v.is_fast_context == true
+    },
+    # stage 2s
+    {
+      for k, v in local._context_tag_values_stage2 : v => {
+        iam         = try(local.tags.context.values.iam[v], {})
+        description = try(local.tags.context.values.description[v], null)
+      }
+    },
+    # stage 3 define no context as they attach to a top-level folder
   )
-  policy_configs = (
-    var.organization_policy_configs == null
-    ? {}
-    : var.organization_policy_configs
-  )
+  # environment tag values and their IAM bindings for stage 2 service accounts
+  environment_tag_values = {
+    for k, v in var.environments : v.tag_name => {
+      iam = merge(
+        # user-defined configuration
+        try(local.tags.environment.values[v.tag_name].iam, {}),
+        # stage 2 service accounts
+        {
+          "roles/resourcemanager.tagUser" = distinct(concat(
+            try(local.tags.environment.values[v.tag_name].iam["roles/resourcemanager.tagUser"], []),
+            !var.fast_stage_2.project_factory.enabled ? [] : [module.pf-sa-rw[0].iam_email],
+            !var.fast_stage_2.networking.enabled ? [] : [module.net-sa-rw[0].iam_email],
+            !var.fast_stage_2.security.enabled ? [] : [module.sec-sa-rw[0].iam_email],
+          ))
+          "roles/resourcemanager.tagViewer" = distinct(concat(
+            try(local.tags.environment.values[v.tag_name].iam["roles/resourcemanager.tagViewer"], []),
+            !var.fast_stage_2.project_factory.enabled ? [] : [module.pf-sa-ro[0].iam_email],
+            !var.fast_stage_2.networking.enabled ? [] : [module.net-sa-ro[0].iam_email],
+            !var.fast_stage_2.security.enabled ? [] : [module.sec-sa-ro[0].iam_email],
+          ))
+        }
+      )
+      description = try(
+        local.tags.environment.values[v].description, null
+      )
+    }
+  }
+  # service account expansion for user-specified tag values
   tags = {
     for k, v in var.tags : k => merge(v, {
       values = {
@@ -47,116 +91,22 @@ locals {
 
 module "organization" {
   source          = "../../../modules/organization"
+  count           = var.root_node == null ? 1 : 0
   organization_id = "organizations/${var.organization.id}"
-  # IAM additive bindings, granted via the restricted Organization Admin custom
-  # role assigned in stage 00; they need to be additive to avoid conflicts
-  iam_additive = merge(
-    {
-      "roles/accesscontextmanager.policyAdmin" = [
-        module.branch-security-sa.iam_email
-      ]
-      "roles/compute.orgFirewallPolicyAdmin" = [
-        module.branch-network-sa.iam_email
-      ]
-      "roles/compute.xpnAdmin" = [
-        module.branch-network-sa.iam_email
-      ]
-    },
-    local.billing_mode == "org" ? {
-      "roles/billing.costsManager" = concat(
-        local.branch_optional_sa_lists.pf-dev,
-        local.branch_optional_sa_lists.pf-prod
-      )
-      "roles/billing.user" = concat(
-        [
-          module.branch-network-sa.iam_email,
-          module.branch-security-sa.iam_email,
-        ],
-        local.branch_optional_sa_lists.dp-dev,
-        local.branch_optional_sa_lists.dp-prod,
-        local.branch_optional_sa_lists.gke-dev,
-        local.branch_optional_sa_lists.gke-prod,
-        local.branch_optional_sa_lists.pf-dev,
-        local.branch_optional_sa_lists.pf-prod,
-      )
-    } : {}
-  )
-
-  # sample subset of useful organization policies, edit to suit requirements
-  org_policies = {
-    "iam.allowedPolicyMemberDomains" = {
-      rules = [
-        {
-          allow = { values = local.all_drs_domains }
-          condition = {
-            expression = "!resource.matchTag('${var.organization.id}/${var.tag_names.org-policies}', 'allowed-policy-member-domains-all')"
-          }
-        },
-        {
-          allow = { all = true }
-          condition = {
-            expression = "resource.matchTag('${var.organization.id}/${var.tag_names.org-policies}', 'allowed-policy-member-domains-all')"
-            title      = "allow-all"
-          }
-        },
-      ]
-    }
-
-    #"gcp.resourceLocations" = {
-    #   allow = { values = local.allowed_regions }
-    # }
-    # "iam.workloadIdentityPoolProviders" = {
-    #   allow =  {
-    #     values = [
-    #       for k, v in coalesce(var.automation.federated_identity_providers, {}) :
-    #       v.issuer_uri
-    #     ]
-    #   }
-    # }
-  }
-  org_policies_data_path = "${var.data_dir}/org-policies"
-
+  # additive bindings leveraging the delegated IAM grant set in stage 0
+  iam_bindings_additive = local.iam_bindings_additive
   # do not assign tagViewer or tagUser roles here on tag keys and values as
   # they are managed authoritatively and will break multitenant stages
-
-  tags = merge(
-    local.tags,
-    {
-      (var.tag_names.context) = {
-        description = "Resource management context."
-        iam         = {}
-        values = {
-          data       = null
-          gke        = null
-          networking = null
-          sandbox    = null
-          security   = null
-          teams      = null
-        }
-      }
-      (var.tag_names.environment) = {
-        description = "Environment definition."
-        iam         = {}
-        values = {
-          development = null
-          production  = null
-        }
-      }
-      (var.tag_names.org-policies) = {
-        description = "Organization policy conditions."
-        iam         = {}
-        values = {
-          allowed-policy-member-domains-all = merge({}, try(
-            local.tags[var.tag_names.org-policies].values.allowed-policy-member-domains-all,
-            {}
-          ))
-        }
-      }
-      (var.tag_names.tenant) = {
-        description = "Organization tenant."
-      }
+  tags = merge(local.tags, {
+    (var.tag_names.context) = {
+      description = "Resource management context."
+      iam         = try(local.tags.context.iam, {})
+      values      = local.context_tag_values
+    },
+    (var.tag_names.environment) = {
+      description = "Environment definition."
+      iam         = try(local.tags.environment.iam, {})
+      values      = local.environment_tag_values
     }
-  )
+  })
 }
-
-# organization policy  conditional roles are in the relevant branch files

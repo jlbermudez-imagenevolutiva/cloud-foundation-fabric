@@ -35,12 +35,14 @@ class State(enum.IntEnum):
   SKIP = enum.auto()
   OK = enum.auto()
   FAIL_STALE_README = enum.auto()
+  FAIL_STALE_TOC = enum.auto()
   FAIL_UNSORTED_VARS = enum.auto()
   FAIL_UNSORTED_OUTPUTS = enum.auto()
   FAIL_VARIABLE_PERIOD = enum.auto()
   FAIL_OUTPUT_PERIOD = enum.auto()
   FAIL_VARIABLE_DESCRIPTION = enum.auto()
   FAIL_OUTPUT_DESCRIPTION = enum.auto()
+  FAIL_MISSING_TYPES = enum.auto()
 
   @property
   def failed(self):
@@ -52,12 +54,14 @@ class State(enum.IntEnum):
         State.SKIP: '  ',
         State.OK: '✓ ',
         State.FAIL_STALE_README: '✗R',
+        State.FAIL_STALE_TOC: '✗T',
         State.FAIL_UNSORTED_VARS: 'SV',
         State.FAIL_UNSORTED_OUTPUTS: 'SO',
         State.FAIL_VARIABLE_PERIOD: '.V',
         State.FAIL_OUTPUT_PERIOD: '.O',
         State.FAIL_VARIABLE_DESCRIPTION: 'DV',
         State.FAIL_OUTPUT_DESCRIPTION: 'DO',
+        State.FAIL_MISSING_TYPES: 'TY',
     }[self.value]
 
 
@@ -70,75 +74,86 @@ def _check_dir(dir_name, exclude_files=None, files=False, show_extra=False):
 
     diff = None
     readme = readme_path.read_text()
-    mod_name = str(readme_path.relative_to(dir_path).parent)
-    result = tfdoc.get_doc(readme)
-    if not result:
-      state = State.SKIP
-    else:
-      try:
-        new_doc = tfdoc.create_doc(readme_path.parent, files, show_extra,
+    readme_rel = str(readme_path.relative_to(BASEDIR))
+    current_doc = tfdoc.get_tfref_parts(readme)
+    current_toc = tfdoc.get_toc_parts(readme)
+    if current_doc or current_toc:
+      new_doc = tfdoc.create_tfref(readme_path.parent, files, show_extra,
                                    exclude_files, readme)
-        newvars = new_doc.variables
-        newouts = new_doc.outputs
-        variables = [v.name for v in newvars if v.file.endswith('variables.tf')]
-        outputs = [o.name for o in newouts if o.file.endswith('outputs.tf')]
-      except SystemExit:
-        state = state.SKIP
-      else:
-        state = State.OK
+      new_toc = tfdoc.create_toc(readme)
+      newvars = new_doc.variables
+      newouts = new_doc.outputs
+      variables = [v.name for v in newvars if v.file.endswith('variables.tf')]
+      outputs = [o.name for o in newouts if o.file.endswith('outputs.tf')]
 
-        if new_doc.content != result['doc']:
-          state = State.FAIL_STALE_README
-          header = f'----- {mod_name} diff -----\n'
-          ndiff = difflib.ndiff(result['doc'].split('\n'),
-                                new_doc.content.split('\n'))
-          diff = '\n'.join([header] + list(ndiff))
+      state = State.OK
 
-        elif empty := [v.name for v in newvars if not v.description]:
-          state = state.FAIL_VARIABLE_DESCRIPTION
-          diff = "\n".join([
-              f'----- {mod_name} variables missing description -----',
-              ', '.join(empty),
-          ])
+      if current_doc and new_doc.content != current_doc['doc']:
+        state = State.FAIL_STALE_README
+        header = f'----- {readme_rel} diff -----\n'
+        ndiff = difflib.ndiff(current_doc['doc'].splitlines(keepends=True),
+                              new_doc.content.splitlines(keepends=True))
+        diff = ''.join([header] + [x for x in ndiff if x[0] != ' '])
 
-        elif empty := [o.name for o in newouts if not o.description]:
-          state = state.FAIL_VARIABLE_DESCRIPTION
-          diff = "\n".join([
-              f'----- {mod_name} outputs missing description -----',
-              ', '.join(empty),
-          ])
+      elif current_toc and new_toc != current_toc['toc']:
+        state = State.FAIL_STALE_TOC
+        header = f'----- {readme_rel} diff -----\n'
+        ndiff = difflib.ndiff(current_toc['toc'].splitlines(keepends=True),
+                              new_toc.splitlines(keepends=True))
+        diff = ''.join([header] + [x for x in ndiff if x[0] != ' '])
 
-        elif variables != sorted(variables):
-          state = state.FAIL_UNSORTED_VARS
-          diff = "\n".join([
-              f'----- {mod_name} variables -----',
-              f'variables should be in this order: ',
-              ', '.join(sorted(variables)),
-          ])
+      elif empty := [v.name for v in newvars if not v.description]:
+        state = state.FAIL_VARIABLE_DESCRIPTION
+        diff = "\n".join([
+            f'----- {readme_rel} variables missing description -----',
+            ', '.join(empty),
+        ])
 
-        elif outputs != sorted(outputs):
-          state = state.FAIL_UNSORTED_OUTPUTS
-          diff = "\n".join([
-              f'----- {mod_name} outputs -----',
-              f'outputs should be in this order: ',
-              ', '.join(sorted(outputs)),
-          ])
+      elif empty := [o.name for o in newouts if not o.description]:
+        state = state.FAIL_VARIABLE_DESCRIPTION
+        diff = "\n".join([
+            f'----- {readme_rel} outputs missing description -----',
+            ', '.join(empty),
+        ])
 
-        elif nc := [v.name for v in newvars if not v.description.endswith('.')]:
-          state = state.FAIL_VARIABLE_PERIOD
-          diff = "\n".join([
-              f'----- {mod_name} variable descriptions missing ending period -----',
-              ', '.join(nc),
-          ])
+      elif variables != sorted(variables):
+        state = state.FAIL_UNSORTED_VARS
+        diff = "\n".join([
+            f'----- {readme_rel} variables -----',
+            f'variables should be in this order: ',
+            ', '.join(sorted(variables)),
+        ])
 
-        elif nc := [o.name for o in newouts if not o.description.endswith('.')]:
-          state = state.FAIL_OUTPUT_PERIOD
-          diff = "\n".join([
-              f'----- {mod_name} output descriptions missing ending period -----',
-              ', '.join(nc),
-          ])
+      elif outputs != sorted(outputs):
+        state = state.FAIL_UNSORTED_OUTPUTS
+        diff = "\n".join([
+            f'----- {readme_rel} outputs -----',
+            f'outputs should be in this order: ',
+            ', '.join(sorted(outputs)),
+        ])
 
-    yield mod_name, state, diff
+      elif nc := [v.name for v in newvars if not v.description.endswith('.')]:
+        state = state.FAIL_VARIABLE_PERIOD
+        diff = "\n".join([
+            f'----- {readme_rel} variable descriptions missing ending period -----',
+            ', '.join(nc),
+        ])
+
+      elif nc := [o.name for o in newouts if not o.description.endswith('.')]:
+        state = state.FAIL_OUTPUT_PERIOD
+        diff = "\n".join([
+            f'----- {readme_rel} output descriptions missing ending period -----',
+            ', '.join(nc),
+        ])
+
+      elif no_types := [v.name for v in newvars if not v.type]:
+        state = state.FAIL_MISSING_TYPES
+        diff = "\n".join([
+            f'----- {readme_rel} variables without types -----',
+            ', '.join(no_types),
+        ])
+
+      yield readme_rel, state, diff
 
 
 @click.command()
@@ -147,18 +162,19 @@ def _check_dir(dir_name, exclude_files=None, files=False, show_extra=False):
 @click.option('--files/--no-files', default=False)
 @click.option('--show-diffs/--no-show-diffs', default=False)
 @click.option('--show-extra/--no-show-extra', default=False)
+@click.option('--show-summary/--no-show-summary', default=True)
 def main(dirs, exclude_file=None, files=False, show_diffs=False,
-         show_extra=False):
+         show_extra=False, show_summary=True):
   'Cycle through modules and ensure READMEs are up-to-date.'
-  print(f'files: {files}, extra: {show_extra}, diffs: {show_diffs}\n')
+  # print(f'files: {files}, extra: {show_extra}, diffs: {show_diffs}\n')
   errors = []
   for dir_name in dirs:
-    print(f'----- {dir_name} -----')
     result = _check_dir(dir_name, exclude_file, files, show_extra)
-    for mod_name, state, diff in result:
+    for readme_path, state, diff in result:
       if state.failed:
-        errors.append((mod_name, diff))
-      print(f'[{state.label}] {mod_name}')
+        errors.append((readme_path, diff))
+      if show_summary:
+        print(f'[{state.label}] {readme_path}')
 
   if errors:
     if show_diffs:
@@ -167,6 +183,7 @@ def main(dirs, exclude_file=None, files=False, show_diffs=False,
     else:
       print('Errored modules:')
       print('\n'.join([e[0] for e in errors]))
+    print(errors)
     raise SystemExit('Errors found.')
 
 

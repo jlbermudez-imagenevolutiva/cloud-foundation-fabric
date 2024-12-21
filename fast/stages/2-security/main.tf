@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,33 +15,51 @@
  */
 
 locals {
-  kms_keys = {
-    for k, v in var.kms_keys : k => {
-      iam    = coalesce(v.iam, {})
-      labels = coalesce(v.labels, {})
-      locations = (
-        v.locations == null
-        ? var.kms_defaults.locations
-        : v.locations
-      )
-      rotation_period = (
-        v.rotation_period == null
-        ? var.kms_defaults.rotation_period
-        : v.rotation_period
-      )
-    }
+  env_tag_values = {
+    for k, v in var.environments :
+    k => var.tag_values["environment/${v.tag_name}"]
   }
-  kms_locations = distinct(flatten([
-    for k, v in local.kms_keys : v.locations
+  has_env_folders = var.folder_ids.security-dev != null
+  iam_delegated = join(",", formatlist("'%s'", [
+    "roles/cloudkms.cryptoKeyEncrypterDecrypter"
   ]))
+  iam_delegated_principals = try(
+    var.stage_config["security"].iam_delegated_principals, {}
+  )
+  iam_viewer_principals = try(
+    var.stage_config["security"].iam_viewer_principals, {}
+  )
+  # list of locations with keys
+  kms_locations = distinct(flatten([
+    for k, v in var.kms_keys : v.locations
+  ]))
+  # map { location -> { key_name -> key_details } }
   kms_locations_keys = {
-    for loc in local.kms_locations : loc => {
-      for k, v in local.kms_keys : k => v if contains(v.locations, loc)
+    for loc in local.kms_locations :
+    loc => {
+      for k, v in var.kms_keys :
+      k => v
+      if contains(v.locations, loc)
     }
   }
   project_services = [
+    "certificatemanager.googleapis.com",
     "cloudkms.googleapis.com",
+    "networkmanagement.googleapis.com",
+    "networksecurity.googleapis.com",
+    "privateca.googleapis.com",
     "secretmanager.googleapis.com",
     "stackdriver.googleapis.com"
   ]
+}
+
+module "folder" {
+  source        = "../../../modules/folder"
+  folder_create = false
+  id            = var.folder_ids.security
+  contacts = (
+    var.essential_contacts == null
+    ? {}
+    : { (var.essential_contacts) = ["ALL"] }
+  )
 }

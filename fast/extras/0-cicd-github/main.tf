@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ locals {
   _repository_files = flatten([
     for k, v in var.repositories : [
       for f in concat(
+        [for f in fileset(path.module, "${v.populate_from}/*.png") : f],
         [for f in fileset(path.module, "${v.populate_from}/*.svg") : f],
         [for f in fileset(path.module, "${v.populate_from}/*.md") : f],
         (v.populate_samples ? [for f in fileset(path.module, "${v.populate_from}/*.sample") : f] : []),
@@ -140,7 +141,7 @@ resource "github_actions_secret" "default" {
   plaintext_value = (
     try(var.modules_config.key_config.keypair_path, null) == null
     ? tls_private_key.default.private_key_openssh
-    : file(pathexpand("${var.modules_config.key_config.keypair_path}"))
+    : file(pathexpand(var.modules_config.key_config.keypair_path))
   )
 }
 
@@ -167,7 +168,7 @@ resource "github_repository_file" "default" {
       "/source(\\s*)=\\s*\"../../../modules/([^/\"]+)\"/",
       "source$1= \"git@github.com:${local.modules_repo}.git//${local.module_prefix}$2${local.modules_ref}\"" # "
     )
-    : file(each.value.file)
+    : try(file(each.value.file), filebase64(each.value.file))
   )
   commit_message      = "${var.commit_config.message} (${each.value.name})"
   commit_author       = var.commit_config.author

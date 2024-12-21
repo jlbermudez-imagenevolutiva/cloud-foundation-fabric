@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,54 +19,60 @@ variable "composer_config" {
   type = object({
     disable_deployment = optional(bool)
     environment_size   = optional(string, "ENVIRONMENT_SIZE_SMALL")
-    software_config = optional(object({
-      airflow_config_overrides = optional(any)
-      pypi_packages            = optional(any)
-      env_variables            = optional(map(string))
-      image_version            = string
-      }), {
-      image_version = "composer-2-airflow-2"
-    })
-    workloads_config = optional(object({
-      scheduler = optional(object(
-        {
-          cpu        = number
-          memory_gb  = number
-          storage_gb = number
-          count      = number
-        }
-        ), {
-        cpu        = 0.5
-        memory_gb  = 1.875
-        storage_gb = 1
-        count      = 1
-      })
-      web_server = optional(object(
-        {
-          cpu        = number
-          memory_gb  = number
-          storage_gb = number
-        }
-        ), {
-        cpu        = 0.5
-        memory_gb  = 1.875
-        storage_gb = 1
-      })
-      worker = optional(object(
-        {
-          cpu        = number
-          memory_gb  = number
-          storage_gb = number
-          min_count  = number
-          max_count  = number
-        }
-        ), {
-        cpu        = 0.5
-        memory_gb  = 1.875
-        storage_gb = 1
-        min_count  = 1
-        max_count  = 3
-      })
+    software_config = optional(
+      object({
+        airflow_config_overrides       = optional(any)
+        pypi_packages                  = optional(any)
+        env_variables                  = optional(map(string))
+        image_version                  = string
+        cloud_data_lineage_integration = optional(bool, true)
+      }),
+      { image_version = "composer-2-airflow-2" }
+    )
+    workloads_config = optional(
+      object({
+        scheduler = optional(
+          object({
+            cpu        = number
+            memory_gb  = number
+            storage_gb = number
+            count      = number
+          }),
+          {
+            cpu        = 0.5
+            memory_gb  = 1.875
+            storage_gb = 1
+            count      = 1
+          }
+        )
+        web_server = optional(
+          object({
+            cpu        = number
+            memory_gb  = number
+            storage_gb = number
+          }),
+          {
+            cpu        = 0.5
+            memory_gb  = 1.875
+            storage_gb = 1
+          }
+        )
+        worker = optional(
+          object({
+            cpu        = number
+            memory_gb  = number
+            storage_gb = number
+            min_count  = number
+            max_count  = number
+          }),
+          {
+            cpu        = 0.5
+            memory_gb  = 1.875
+            storage_gb = 1
+            min_count  = 1
+            max_count  = 3
+          }
+        )
     }))
   })
   default = {
@@ -99,19 +105,23 @@ variable "composer_config" {
 
 variable "data_catalog_tags" {
   description = "List of Data Catalog Policy tags to be created with optional IAM binging configuration in {tag => {ROLE => [MEMBERS]}} format."
-  type        = map(map(list(string)))
-  nullable    = false
+  type = map(object({
+    description = optional(string)
+    iam         = optional(map(list(string)), {})
+  }))
+  nullable = false
   default = {
-    "3_Confidential" = null
-    "2_Private"      = null
-    "1_Sensitive"    = null
+    "3_Confidential" = {}
+    "2_Private"      = {}
+    "1_Sensitive"    = {}
   }
 }
 
-variable "data_force_destroy" {
-  description = "Flag to set 'force_destroy' on data services like BiguQery or Cloud Storage."
+variable "deletion_protection" {
+  description = "Prevent Terraform from destroying data storage resources (storage buckets, GKE clusters, CloudSQL instances) in this blueprint. When this field is set in Terraform state, a terraform destroy or terraform apply that would delete data storage resources will fail."
   type        = bool
   default     = false
+  nullable    = false
 }
 
 variable "groups" {
@@ -171,6 +181,7 @@ variable "project_config" {
   description = "Provide 'billing_account_id' value if project creation is needed, uses existing 'project_ids' if null. Parent is in 'folders/nnn' or 'organizations/nnn' format."
   type = object({
     billing_account_id = optional(string, null)
+    project_create     = optional(bool, true)
     parent             = string
     project_ids = optional(object({
       drop     = string
@@ -227,11 +238,12 @@ variable "region" {
 variable "service_encryption_keys" {
   description = "Cloud KMS to use to encrypt different services. Key location should match service region."
   type = object({
-    bq       = string
-    composer = string
-    dataflow = string
-    storage  = string
-    pubsub   = string
+    bq       = optional(string)
+    composer = optional(string)
+    dataflow = optional(string)
+    storage  = optional(string)
+    pubsub   = optional(string)
   })
-  default = null
+  default  = {}
+  nullable = false
 }

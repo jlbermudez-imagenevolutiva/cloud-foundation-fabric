@@ -1,34 +1,36 @@
-# Shared security resources
+# Shared security resources and VPC Service Controls
 
-This stage sets up security resources and configurations which impact the whole organization, or are shared across the hierarchy to other projects and teams.
+This stage sets up an area dedicated to hosting security resources and configurations which impact the whole organization, or are shared across the hierarchy to other projects and teams.
 
-The design of this stage is fairly general, and provides a reference example for [Cloud KMS](https://cloud.google.com/security-key-management) and a [VPC Service Controls](https://cloud.google.com/vpc-service-controls) configuration that sets up three perimeters (landing, development, production), their related bridge perimeters, and provides variables to configure their resources, access levels, and directional policies.
+The design of this stage is fairly general, and out of the box it only provides a reference example for [Cloud KMS](https://cloud.google.com/security-key-management).
 
-Expanding this stage to include other security-related services like Secret Manager, is fairly simple by using the provided implementation for Cloud KMS, and leveraging the broad permissions on the top-level Security folder of the automation service account used.
+Expanding it to include other security-related services like Secret Manager is fairly simple by adapting the provided implementation for Cloud KMS, and leveraging the broad permissions granted on the top-level Security folder to the automation service account used here.
 
-The following diagram illustrates the high-level design of created resources and a schema of the VPC SC design, which can be adapted to specific requirements via variables:
+The following diagram illustrates the high-level design of resources managed here:
 
 <p align="center">
-  <img src="diagram.svg" alt="Security diagram">
+  <img src="diagram.png" alt="Security diagram">
 </p>
 
-## Table of contents
-
+<!-- BEGIN TOC -->
 - [Design overview and choices](#design-overview-and-choices)
   - [Cloud KMS](#cloud-kms)
-  - [VPC Service Controls](#vpc-service-controls)
+  - [Certificate Authority Service (CAS)](#certificate-authority-service-cas)
+  - [Trust Configs](#trust-configs)
+  - [NGFW Enterprise and TLS inspection support](#ngfw-enterprise-and-tls-inspection-support)
 - [How to run this stage](#how-to-run-this-stage)
   - [Provider and Terraform variables](#provider-and-terraform-variables)
   - [Impersonating the automation service account](#impersonating-the-automation-service-account)
   - [Variable configuration](#variable-configuration)
+  - [Using delayed billing association for projects](#using-delayed-billing-association-for-projects)
   - [Running the stage](#running-the-stage)
 - [Customizations](#customizations)
   - [KMS keys](#kms-keys)
-  - [VPC Service Controls configuration](#vpc-service-controls-configuration)
-    - [Dry-run vs. enforced](#dry-run-vs-enforced)
-    - [Access levels](#access-levels)
-    - [Ingress and Egress policies](#ingress-and-egress-policies)
-    - [Perimeters](#perimeters)
+  - [NGFW Enterprise - sample TLS configurations](#ngfw-enterprise-sample-tls-configurations)
+- [Files](#files)
+- [Variables](#variables)
+- [Outputs](#outputs)
+<!-- END TOC -->
 
 ## Design overview and choices
 
@@ -36,27 +38,31 @@ Project-level security resources are grouped into two separate projects, one per
 
 Cloud KMS is configured and designed mainly to encrypt GCP resources with a [Customer-managed encryption key](https://cloud.google.com/kms/docs/cmek) but it may be used to create cryptokeys used to [encrypt application data](https://cloud.google.com/kms/docs/encrypting-application-data) too.
 
-IAM for management-related operations is already assigned at the folder level to the security team by the previous stage, but more granularity can be added here at the project level, to grant control of separate services across environments to different actors.
+IAM for day to day operations is already assigned at the folder level to the security team by the previous stage, but more granularity can be added here at the project level, to grant control of separate services across environments to different actors.
 
 ### Cloud KMS
 
 A reference Cloud KMS implementation is part of this stage, to provide a simple way of managing centralized keys, that are then shared and consumed widely across the organization to enable customer-managed encryption. The implementation is also easy to clone and modify to support other services like Secret Manager.
 
-The Cloud KMS configuration allows defining keys by name (typically matching the downstream service that uses them) in different locations, either based on a common default or a per-key setting. It then takes care internally of provisioning the relevant keyrings and creating keys in the appropriate location.
+The Cloud KMS configuration allows defining keys by name (typically matching the downstream service that uses them) in different locations. It then takes care internally of provisioning the relevant keyrings and creating keys in the appropriate location.
 
 IAM roles on keys can be configured at the logical level for all locations where a logical key is created. Their management can also be delegated via [delegated role grants](https://cloud.google.com/iam/docs/setting-limits-on-granting-roles) exposed through a simple variable, to allow other identities to set IAM policies on keys. This is particularly useful in setups like project factories, making it possible to configure IAM bindings during project creation for team groups or service agent accounts (compute, storage, etc.).
 
-### VPC Service Controls
+### Certificate Authority Service (CAS)
 
-This stage also provisions the VPC Service Controls configuration on demand for the whole organization, implementing the straightforward design illustrated above:
+With this stage you can leverage Certificate Authority Services (CAS) and create as many CAs you need for each environments. To create custom CAS, you can use the `cas_configs` variable. The variable comes with some defaults, useful for demos: in each environment, specifying the CA `location` should be enough for most of your test scenarios.
 
-- one perimeter for each environment
-- one perimeter for centralized services and the landing VPC
-- bridge perimeters to connect the landing perimeter to each environment
+### Trust Configs
 
-The VPC SC configuration is set to dry-run mode, but switching to enforced mode is a simple operation involving modifying a few lines of code highlighted by ad-hoc comments. Variables are designed to enable easy centralized management of VPC Service Controls, including access levels and [ingress/egress rules](https://cloud.google.com/vpc-service-controls/docs/ingress-egress-rules) as described below.
+The stage lets you also create Certificate Manager trust configs. With trust configs you can trust whole CAs or specific server certificates, when you use them with other services, such as NGFW Enterprise. You can create additional trust configs for each environment with the `trust_configs` variable. At a very minimum, each trust config needs a `location` (the region) and either a `trust_stores` block or an `allowed_certificates` block.
 
-Some care needs to be taken with project membership in perimeters, which can only be implemented here instead of being delegated (all or partially) to different stages, until the [Google Provider feature request](https://github.com/hashicorp/terraform-provider-google/issues/7270) allowing using project-level association for both enforced and dry-run modes is implemented.
+### NGFW Enterprise and TLS inspection support
+
+We deploy NGFW Enterprise in the [network security stage](../2-network-security/README.md). If you require TLS inspection, NGFW needs to interact with CAS and -optionally- Certificate Manager trust-configs. These components bind to firewall endpoint associations (created in the network security stage) with zonal TLS inspection policies.
+Using this module, you can define CAS configurations and trust-configs for NGFW Enterprise. You can create them using the `cas_configs` and `trust_configs` variables. Anyway, these will need to use specific keys (defined in `ngfw_tls_configs.keys`), so that FAST knows which configurations to use for NGFW Enterprise.
+You can then enable TLS inspection and customize its behavior for NGFW Enterprise, using the `ngfw_tls_configs.tls_inspection` variable. FAST will create the TLS inspection policies for you in the regions where you defined your CAs for NGFW Enterprise.
+When you create your CAs and trust-configs for NGFW Enterprise, make sure their region matches the zones where you will define your firewall endpoints.
+You can read more about NGFW configurations in the [Customizations section](#customizations) of this document.
 
 ## How to run this stage
 
@@ -70,28 +76,46 @@ Before running this stage, you need to make sure you have the correct credential
 
 As all other FAST stages, the [mechanism used to pass variable values and pre-built provider files from one stage to the next](../0-bootstrap/README.md#output-files-and-cross-stage-variables) is also leveraged here.
 
-The commands to link or copy the provider and terraform variable files can be easily derived from the `stage-links.sh` script in the FAST root folder, passing it a single argument with the local output files folder (if configured) or the GCS output bucket in the automation project (derived from stage 0 outputs). The following examples demonstrate both cases, and the resulting commands that then need to be copy/pasted and run.
+The commands to link or copy the provider and terraform variable files can be easily derived from the `fast-links.sh` script in the FAST stages folder, passing it a single argument with the local output files folder (if configured) or the GCS output bucket in the automation project (derived from stage 0 outputs). The following examples demonstrate both cases, and the resulting commands that then need to be copy/pasted and run.
 
 ```bash
-../../stage-links.sh ~/fast-config
+../fast-links.sh ~/fast-config
 
-# copy and paste the following commands for '2-security'
+# File linking commands for security stage
 
-ln -s ~/fast-config/providers/2-security-providers.tf ./
-ln -s ~/fast-config/tfvars/globals.auto.tfvars.json ./
-ln -s ~/fast-config/tfvars/0-bootstrap.auto.tfvars.json ./
-ln -s ~/fast-config/tfvars/1-resman.auto.tfvars.json ./
+# provider file
+ln -s ~/fast-config/fast-test-00/providers/2-security-providers.tf ./
+
+# input files from other stages
+ln -s ~/fast-config/fast-test-00/tfvars/0-globals.auto.tfvars.json ./
+ln -s ~/fast-config/fast-test-00/tfvars/0-bootstrap.auto.tfvars.json ./
+ln -s ~/fast-config/fast-test-00/tfvars/1-resman.auto.tfvars.json ./
+
+# conventional place for stage tfvars (manually created)
+ln -s ~/fast-config/fast-test-00/2-security.auto.tfvars ./
+
+# optional files
+ln -s ~/fast-config/fast-test-00/2-nsec.auto.tfvars.json ./
 ```
 
 ```bash
-../../stage-links.sh gs://xxx-prod-iac-core-outputs-0
+../fast-links.sh gs://xxx-prod-iac-core-outputs-0
 
-# copy and paste the following commands for '2-security'
+# File linking commands for security stage
 
-gcloud alpha storage cp gs://xxx-prod-iac-core-outputs-0/providers/2-security-providers.tf ./
-gcloud alpha storage cp gs://xxx-prod-iac-core-outputs-0/tfvars/globals.auto.tfvars.json ./
-gcloud alpha storage cp gs://xxx-prod-iac-core-outputs-0/tfvars/0-bootstrap.auto.tfvars.json ./
-gcloud alpha storage cp gs://xxx-prod-iac-core-outputs-0/tfvars/1-resman.auto.tfvars.json ./
+# provider file
+gcloud storage cp gs://xxx-prod-iac-core-outputs-0/providers/2-security-providers.tf ./
+
+# input files from other stages
+gcloud storage cp gs://xxx-prod-iac-core-outputs-0/tfvars/0-globals.auto.tfvars.json ./
+gcloud storage cp gs://xxx-prod-iac-core-outputs-0/tfvars/0-bootstrap.auto.tfvars.json ./
+gcloud storage cp gs://xxx-prod-iac-core-outputs-0/tfvars/1-resman.auto.tfvars.json ./
+
+# conventional place for stage tfvars (manually created)
+gcloud storage cp gs://xxx-prod-iac-core-outputs-0/2-security.auto.tfvars ./
+
+# optional files
+gcloud storage cp gs://xxx-prod-iac-core-outputs-0/2-nsec.auto.tfvars.json ./
 ```
 
 ### Impersonating the automation service account
@@ -102,8 +126,8 @@ The preconfigured provider file uses impersonation to run with this stage's auto
 
 Variables in this stage -- like most other FAST stages -- are broadly divided into three separate sets:
 
-- variables which refer to global values for the whole organization (org id, billing account id, prefix, etc.), which are pre-populated via the `globals.auto.tfvars.json` file linked or copied above
-- variables which refer to resources managed by previous stage, which are prepopulated here via the `0-bootstrap.auto.tfvars.json` and `1-resman.auto.tfvars.json` files linked or copied above
+- variables which refer to global values for the whole organization (org id, billing account id, prefix, etc.), which are pre-populated via the `0-globals.auto.tfvars.json` file linked or copied above
+- variables which refer to resources managed by previous stages, which are prepopulated here via the `0-bootstrap.auto.tfvars.json` and `1-resman.auto.tfvars.json` files linked or copied above
 - and finally variables that optionally control this stage's behaviour and customizations, and can to be set in a custom `terraform.tfvars` file
 
 The latter set is explained in the [Customization](#customizations) sections below, and the full list can be found in the [Variables](#variables) table at the bottom of this document.
@@ -118,7 +142,7 @@ outputs_location = "~/fast-config"
 
 This configuration is possible but unsupported and only exists for development purposes, use at your own risk:
 
-- temporarily switch `billing_account.id` to `null` in `globals.auto.tfvars.json`
+- temporarily switch `billing_account.id` to `null` in `0-globals.auto.tfvars.json`
 - for each project resources in the project modules used in this stage (`dev-sec-project`, `prod-sec-project`)
   - apply using `-target`, for example
     `terraform apply -target 'module.prod-sec-project.google_project.project[0]'`
@@ -141,10 +165,7 @@ terraform apply
 
 ### KMS keys
 
-Cloud KMS configuration is split in two variables:
-
-- `kms_defaults` configures the locations and rotation period, used for keys that don't specifically configure them
-- `kms_keys` configures the actual keys to create, and also allows configuring their IAM bindings and labels, and overriding locations and rotation period. When configuring locations for a key, please consider the limitations each cloud product may have.
+Cloud KMS configuration is controlled by `kms_keys`, which configures the actual keys to create, and also allows configuring their IAM bindings, labels, locations and rotation period. When configuring locations for a key, please consider the limitations each cloud product may have.
 
 The additional `kms_restricted_admins` variable allows granting `roles/cloudkms.admin` to specified principals, restricted via [delegated role grants](https://cloud.google.com/iam/docs/setting-limits-on-granting-roles) so that it only allows granting the roles needed for encryption/decryption on keys. This allows safe delegation of key management to subsequent Terraform stages like the Project Factory, for example to grant usage access on relevant keys to the service agent accounts for compute, storage, etc.
 
@@ -155,10 +176,6 @@ An example of how to configure keys:
 ```tfvars
 # terraform.tfvars
 
-kms_defaults = {
-  locations       = ["europe-west1", "europe-west3", "global"]
-  rotation_period = "7776000s"
-}
 kms_keys = {
   compute = {
     iam = {
@@ -167,12 +184,12 @@ kms_keys = {
       ]
     }
     labels          = { service = "compute" }
-    locations       = null
-    rotation_period = null
+    locations       = ["europe-west1", "europe-west3", "global"]
+    rotation_period = "7776000s"
   }
   storage = {
     iam             = null
-    labels          = { service = "compute" }
+    labels          = { service = "storage" }
     locations       = ["europe"]
     rotation_period = null
   }
@@ -181,146 +198,127 @@ kms_keys = {
 
 The script will create one keyring for each specified location and keys on each keyring.
 
-### VPC Service Controls configuration
+### NGFW Enterprise - sample TLS configurations
 
-A set of variables allows configuring the VPC SC perimeters described above:
-
-- `vpc_sc_perimeter_projects` configures project membership in the three regular perimeters
-- `vpc_sc_access_levels` configures access levels, which can then be associated to perimeters by key using the `vpc_sc_perimeter_access_levels`
-- `vpc_sc_egress_policies` configures directional egress policies, which can then be associated to perimeters by key using the `vpc_sc_perimeter_egress_policies`
-- `vpc_sc_ingress_policies` configures directional ingress policies, which can then be associated to perimeters by key using the `vpc_sc_perimeter_ingress_policies`
-
-This allows configuring VPC SC in a fairly flexible and concise way, without repeating similar definitions. Bridges perimeters configuration will be computed automatically to allow communication between regular perimeters: `landing <-> prod` and `landing <-> dev`.
-
-#### Dry-run vs. enforced
-
-The VPC SC configuration is set up by default in dry-run mode to allow easy experimentation, and detecting violations before enforcement. Once everything is set up correctly, switching to enforced mode needs to be done in code, by changing the `vpc_sc_explicit_dry_run_spec` local.
-
-#### Access levels
-
-Access levels are defined via the `vpc_sc_access_levels` variable, and referenced by key in perimeter definitions:
+This is a minimal configuration that creates a CAs for each environment and enables TLS inspection policies for NGFW Enterprise.
 
 ```tfvars
-vpc_sc_access_levels = {
-  onprem = {
-    conditions = [{
-      ip_subnetworks = ["101.101.101.0/24"]
-    }]
-  }
-}
-```
-
-#### Ingress and Egress policies
-
-Ingress and egress policy are defined via the `vpc_sc_egress_policies` and `vpc_sc_ingress_policies`, and referenced by key in perimeter definitions:
-
-```tfvars
-vpc_sc_egress_policies = {
-  iac-gcs = {
-    from = {
-      identities = [
-        "serviceAccount:xxx-prod-resman-security-0@xxx-prod-iac-core-0.iam.gserviceaccount.com"
-      ]
-    }
-    to = {
-      operations = [{
-        method_selectors = ["*"]
-        service_name     = "storage.googleapis.com"
-      }]
-      resources = ["projects/123456782"]
-    }
-  }
-}
-vpc_sc_ingress_policies = {
-  iac = {
-    from = {
-      identities = [
-        "serviceAccount:xxx-prod-resman-security-0@xxx-prod-iac-core-0.iam.gserviceaccount.com"
-      ]
-      access_levels = ["*"]
-    }
-    to = {
-      operations = [{ method_selectors = [], service_name = "*" }]
-      resources  = ["*"]
-    }
-  }
-}
-```
-
-#### Perimeters
-
-Regular perimeters are defined via the  the `vpc_sc_perimeters` variable, and bridge perimeters are automatically populated from that variable.
-
-Support for independently adding projects to perimeters outside of this Terraform setup is pending resolution of [this Google Terraform Provider issue](https://github.com/hashicorp/terraform-provider-google/issues/7270), which implements support for dry-run mode in the additive resource.
-
-Access levels and egress/ingress policies are referenced in perimeters via keys.
-
-```tfvars
-vpc_sc_perimeters = {
+cas_configs = {
   dev = {
-    egress_policies  = ["iac-gcs"]
-    ingress_policies = ["iac"]
-    resources        = ["projects/1111111111"]
-  }
-  landing = {
-    access_levels    = ["onprem"]
-    egress_policies  = ["iac-gcs"]
-    ingress_policies = ["iac"]
-    resources        = ["projects/2222222222"]
+    ngfw-dev-cas-0 = {
+      location = "europe-west1"
+    }
   }
   prod = {
-    egress_policies  = ["iac-gcs"]
-    ingress_policies = ["iac"]
-    resources        = ["projects/0000000000"]
+    ngfw-prod-cas-0 = {
+      location = "europe-west1"
+    }
   }
+}
+tls_inspection = {
+  enabled = true
 }
 ```
 
-## Notes
+You can optionally create also trust-configs for NGFW Enterprise.
 
-Some references that might be useful in setting up this stage:
+```tfvars
+cas_configs = {
+  dev = {
+    ngfw-dev-cas-0 = {
+      location = "europe-west1"
+    }
+  }
+  prod = {
+    ngfw-prod-cas-0 = {
+      location = "europe-west1"
+    }
+  }
+}
+trust_configs = {
+  dev = {
+    ngfw-dev-tc-0 = {
+      allowlisted_certificates = {
+        my_ca = "~/my_keys/srv-dev.crt"
+      }
+      location = "europe-west1"
+    }
+  }
+  prod = {
+    ngfw-prod-tc-0 = {
+      allowlisted_certificates = {
+        my_ca = "~/my_keys/srv-prod.crt"
+      }
+      location = "europe-west1"
+    }
+  }
+}
+tls_inspection = {
+  enabled = true
+}
+```
 
-- [VPC SC CSCC requirements](https://cloud.google.com/security-command-center/docs/troubleshooting).
+You can customize the keys of your configurations, as long as they match the ones you specify in the `ngfw_tls_configs.keys` variable.
 
-<!-- TFDOC OPTS files:1 show_extra:1 -->
+```tfvars
+cas_configs = {
+  dev = {
+    my-ca-0 = {
+      location = "europe-west1"
+    }
+  }
+}
+ngfw_tls_configs = {
+  keys = {
+    dev = {
+      cas = "my-ca-0"
+    }
+  }
+}
+tls_inspection = {
+  enabled = true
+}
+```
+
+<!-- TFDOC OPTS files:1 show_extra:1 exclude:2-security-providers.tf -->
 <!-- BEGIN TFDOC -->
-
 ## Files
 
 | name | description | modules | resources |
 |---|---|---|---|
-| [core-dev.tf](./core-dev.tf) | None | <code>kms</code> · <code>project</code> | <code>google_project_iam_member</code> |
-| [core-prod.tf](./core-prod.tf) | None | <code>kms</code> · <code>project</code> | <code>google_project_iam_member</code> |
-| [main.tf](./main.tf) | Module-level locals and resources. |  |  |
+| [core-dev.tf](./core-dev.tf) | None | <code>certificate-authority-service</code> · <code>kms</code> · <code>project</code> | <code>google_certificate_manager_trust_config</code> · <code>google_network_security_tls_inspection_policy</code> |
+| [core-prod.tf](./core-prod.tf) | None | <code>certificate-authority-service</code> · <code>kms</code> · <code>project</code> | <code>google_certificate_manager_trust_config</code> · <code>google_network_security_tls_inspection_policy</code> |
+| [main.tf](./main.tf) | Module-level locals and resources. | <code>folder</code> |  |
 | [outputs.tf](./outputs.tf) | Module outputs. |  | <code>google_storage_bucket_object</code> · <code>local_file</code> |
+| [variables-fast.tf](./variables-fast.tf) | None |  |  |
 | [variables.tf](./variables.tf) | Module variables. |  |  |
-| [vpc-sc.tf](./vpc-sc.tf) | None | <code>vpc-sc</code> |  |
 
 ## Variables
 
 | name | description | type | required | default | producer |
 |---|---|:---:|:---:|:---:|:---:|
-| [automation](variables.tf#L17) | Automation resources created by the bootstrap stage. | <code title="object&#40;&#123;&#10;  outputs_bucket &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>0-bootstrap</code> |
-| [billing_account](variables.tf#L25) | Billing account id. If billing account is not part of the same org set `is_org_level` to false. | <code title="object&#40;&#123;&#10;  id           &#61; string&#10;  is_org_level &#61; optional&#40;bool, true&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>0-bootstrap</code> |
-| [folder_ids](variables.tf#L38) | Folder name => id mappings, the 'security' folder name must exist. | <code title="object&#40;&#123;&#10;  security &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>1-resman</code> |
-| [organization](variables.tf#L84) | Organization details. | <code title="object&#40;&#123;&#10;  domain      &#61; string&#10;  id          &#61; number&#10;  customer_id &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>0-bootstrap</code> |
-| [prefix](variables.tf#L100) | Prefix used for resources that need unique names. Use 9 characters or less. | <code>string</code> | ✓ |  | <code>0-bootstrap</code> |
-| [service_accounts](variables.tf#L111) | Automation service accounts that can assign the encrypt/decrypt roles on keys. | <code title="object&#40;&#123;&#10;  data-platform-dev    &#61; string&#10;  data-platform-prod   &#61; string&#10;  project-factory-dev  &#61; string&#10;  project-factory-prod &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>1-resman</code> |
-| [groups](variables.tf#L46) | Group names to grant organization-level permissions. | <code>map&#40;string&#41;</code> |  | <code title="&#123;&#10;  gcp-billing-admins      &#61; &#34;gcp-billing-admins&#34;,&#10;  gcp-devops              &#61; &#34;gcp-devops&#34;,&#10;  gcp-network-admins      &#61; &#34;gcp-network-admins&#34;&#10;  gcp-organization-admins &#61; &#34;gcp-organization-admins&#34;&#10;  gcp-security-admins     &#61; &#34;gcp-security-admins&#34;&#10;  gcp-support             &#61; &#34;gcp-support&#34;&#10;&#125;">&#123;&#8230;&#125;</code> | <code>0-bootstrap</code> |
-| [kms_defaults](variables.tf#L61) | Defaults used for KMS keys. | <code title="object&#40;&#123;&#10;  locations       &#61; list&#40;string&#41;&#10;  rotation_period &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code title="&#123;&#10;  locations       &#61; &#91;&#34;europe&#34;, &#34;europe-west1&#34;, &#34;europe-west3&#34;, &#34;global&#34;&#93;&#10;  rotation_period &#61; &#34;7776000s&#34;&#10;&#125;">&#123;&#8230;&#125;</code> |  |
-| [kms_keys](variables.tf#L73) | KMS keys to create, keyed by name. Null attributes will be interpolated with defaults. | <code title="map&#40;object&#40;&#123;&#10;  iam             &#61; map&#40;list&#40;string&#41;&#41;&#10;  labels          &#61; map&#40;string&#41;&#10;  locations       &#61; list&#40;string&#41;&#10;  rotation_period &#61; string&#10;&#125;&#41;&#41;">map&#40;object&#40;&#123;&#8230;&#125;&#41;&#41;</code> |  | <code>&#123;&#125;</code> |  |
-| [outputs_location](variables.tf#L94) | Path where providers, tfvars files, and lists for the following stages are written. Leave empty to disable. | <code>string</code> |  | <code>null</code> |  |
-| [vpc_sc_access_levels](variables.tf#L122) | VPC SC access level definitions. | <code title="map&#40;object&#40;&#123;&#10;  combining_function &#61; optional&#40;string&#41;&#10;  conditions &#61; optional&#40;list&#40;object&#40;&#123;&#10;    device_policy &#61; optional&#40;object&#40;&#123;&#10;      allowed_device_management_levels &#61; optional&#40;list&#40;string&#41;&#41;&#10;      allowed_encryption_statuses      &#61; optional&#40;list&#40;string&#41;&#41;&#10;      require_admin_approval           &#61; bool&#10;      require_corp_owned               &#61; bool&#10;      require_screen_lock              &#61; optional&#40;bool&#41;&#10;      os_constraints &#61; optional&#40;list&#40;object&#40;&#123;&#10;        os_type                    &#61; string&#10;        minimum_version            &#61; optional&#40;string&#41;&#10;        require_verified_chrome_os &#61; optional&#40;bool&#41;&#10;      &#125;&#41;&#41;&#41;&#10;    &#125;&#41;&#41;&#10;    ip_subnetworks         &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    members                &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    negate                 &#61; optional&#40;bool&#41;&#10;    regions                &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    required_access_levels &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;  &#125;&#41;&#41;, &#91;&#93;&#41;&#10;  description &#61; optional&#40;string&#41;&#10;&#125;&#41;&#41;">map&#40;object&#40;&#123;&#8230;&#125;&#41;&#41;</code> |  | <code>&#123;&#125;</code> |  |
-| [vpc_sc_egress_policies](variables.tf#L151) | VPC SC egress policy definitions. | <code title="map&#40;object&#40;&#123;&#10;  from &#61; object&#40;&#123;&#10;    identity_type &#61; optional&#40;string, &#34;ANY_IDENTITY&#34;&#41;&#10;    identities    &#61; optional&#40;list&#40;string&#41;&#41;&#10;  &#125;&#41;&#10;  to &#61; object&#40;&#123;&#10;    operations &#61; optional&#40;list&#40;object&#40;&#123;&#10;      method_selectors &#61; optional&#40;list&#40;string&#41;&#41;&#10;      service_name     &#61; string&#10;    &#125;&#41;&#41;, &#91;&#93;&#41;&#10;    resources              &#61; optional&#40;list&#40;string&#41;&#41;&#10;    resource_type_external &#61; optional&#40;bool, false&#41;&#10;  &#125;&#41;&#10;&#125;&#41;&#41;">map&#40;object&#40;&#123;&#8230;&#125;&#41;&#41;</code> |  | <code>&#123;&#125;</code> |  |
-| [vpc_sc_ingress_policies](variables.tf#L171) | VPC SC ingress policy definitions. | <code title="map&#40;object&#40;&#123;&#10;  from &#61; object&#40;&#123;&#10;    access_levels &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    identity_type &#61; optional&#40;string&#41;&#10;    identities    &#61; optional&#40;list&#40;string&#41;&#41;&#10;    resources     &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;  &#125;&#41;&#10;  to &#61; object&#40;&#123;&#10;    operations &#61; optional&#40;list&#40;object&#40;&#123;&#10;      method_selectors &#61; optional&#40;list&#40;string&#41;&#41;&#10;      service_name     &#61; string&#10;    &#125;&#41;&#41;, &#91;&#93;&#41;&#10;    resources &#61; optional&#40;list&#40;string&#41;&#41;&#10;  &#125;&#41;&#10;&#125;&#41;&#41;">map&#40;object&#40;&#123;&#8230;&#125;&#41;&#41;</code> |  | <code>&#123;&#125;</code> |  |
-| [vpc_sc_perimeters](variables.tf#L192) | VPC SC regular perimeter definitions. | <code title="object&#40;&#123;&#10;  dev &#61; optional&#40;object&#40;&#123;&#10;    access_levels    &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    egress_policies  &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    ingress_policies &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    resources        &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;  &#125;&#41;, &#123;&#125;&#41;&#10;  landing &#61; optional&#40;object&#40;&#123;&#10;    access_levels    &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    egress_policies  &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    ingress_policies &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    resources        &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;  &#125;&#41;, &#123;&#125;&#41;&#10;  prod &#61; optional&#40;object&#40;&#123;&#10;    access_levels    &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    egress_policies  &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    ingress_policies &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;    resources        &#61; optional&#40;list&#40;string&#41;, &#91;&#93;&#41;&#10;  &#125;&#41;, &#123;&#125;&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code>&#123;&#125;</code> |  |
+| [automation](variables-fast.tf#L17) | Automation resources created by the bootstrap stage. | <code title="object&#40;&#123;&#10;  outputs_bucket &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>0-bootstrap</code> |
+| [billing_account](variables-fast.tf#L25) | Billing account id. If billing account is not part of the same org set `is_org_level` to false. | <code title="object&#40;&#123;&#10;  id           &#61; string&#10;  is_org_level &#61; optional&#40;bool, true&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>0-bootstrap</code> |
+| [environments](variables-fast.tf#L47) | Environment names. | <code title="map&#40;object&#40;&#123;&#10;  name       &#61; string&#10;  tag_name   &#61; string&#10;  is_default &#61; optional&#40;bool, false&#41;&#10;&#125;&#41;&#41;">map&#40;object&#40;&#123;&#8230;&#125;&#41;&#41;</code> | ✓ |  | <code>0-globals</code> |
+| [folder_ids](variables-fast.tf#L64) | Folder name => id mappings, the 'security' folder name must exist. | <code title="object&#40;&#123;&#10;  security      &#61; string&#10;  security-dev  &#61; optional&#40;string&#41;&#10;  security-prod &#61; optional&#40;string&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> | ✓ |  | <code>1-resman</code> |
+| [prefix](variables-fast.tf#L74) | Prefix used for resources that need unique names. Use a maximum of 9 chars for organizations, and 11 chars for tenants. | <code>string</code> | ✓ |  | <code>0-bootstrap</code> |
+| [cas_configs](variables.tf#L17) | The CAS CAs to add to each environment. | <code title="object&#40;&#123;&#10;  dev &#61; optional&#40;map&#40;object&#40;&#123;&#10;    ca_configs &#61; map&#40;object&#40;&#123;&#10;      deletion_protection                    &#61; optional&#40;string, true&#41;&#10;      type                                   &#61; optional&#40;string, &#34;SELF_SIGNED&#34;&#41;&#10;      is_ca                                  &#61; optional&#40;bool, true&#41;&#10;      lifetime                               &#61; optional&#40;string, null&#41;&#10;      pem_ca_certificate                     &#61; optional&#40;string, null&#41;&#10;      ignore_active_certificates_on_deletion &#61; optional&#40;bool, false&#41;&#10;      skip_grace_period                      &#61; optional&#40;bool, true&#41;&#10;      labels                                 &#61; optional&#40;map&#40;string&#41;, null&#41;&#10;      gcs_bucket                             &#61; optional&#40;string, null&#41;&#10;      key_spec &#61; optional&#40;object&#40;&#123;&#10;        algorithm  &#61; optional&#40;string, &#34;RSA_PKCS1_2048_SHA256&#34;&#41;&#10;        kms_key_id &#61; optional&#40;string, null&#41;&#10;      &#125;&#41;, &#123;&#125;&#41;&#10;      key_usage &#61; optional&#40;object&#40;&#123;&#10;        cert_sign          &#61; optional&#40;bool, true&#41;&#10;        client_auth        &#61; optional&#40;bool, false&#41;&#10;        code_signing       &#61; optional&#40;bool, false&#41;&#10;        content_commitment &#61; optional&#40;bool, false&#41;&#10;        crl_sign           &#61; optional&#40;bool, true&#41;&#10;        data_encipherment  &#61; optional&#40;bool, false&#41;&#10;        decipher_only      &#61; optional&#40;bool, false&#41;&#10;        digital_signature  &#61; optional&#40;bool, false&#41;&#10;        email_protection   &#61; optional&#40;bool, false&#41;&#10;        encipher_only      &#61; optional&#40;bool, false&#41;&#10;        key_agreement      &#61; optional&#40;bool, false&#41;&#10;        key_encipherment   &#61; optional&#40;bool, true&#41;&#10;        ocsp_signing       &#61; optional&#40;bool, false&#41;&#10;        server_auth        &#61; optional&#40;bool, true&#41;&#10;        time_stamping      &#61; optional&#40;bool, false&#41;&#10;      &#125;&#41;, &#123;&#125;&#41;&#10;      subject &#61; optional&#40;object&#40;&#123;&#10;        common_name         &#61; string&#10;        organization        &#61; string&#10;        country_code        &#61; optional&#40;string&#41;&#10;        locality            &#61; optional&#40;string&#41;&#10;        organizational_unit &#61; optional&#40;string&#41;&#10;        postal_code         &#61; optional&#40;string&#41;&#10;        province            &#61; optional&#40;string&#41;&#10;        street_address      &#61; optional&#40;string&#41;&#10;        &#125;&#41;, &#123;&#10;        common_name  &#61; &#34;test.example.com&#34;&#10;        organization &#61; &#34;Test Example&#34;&#10;      &#125;&#41;&#10;      subject_alt_name &#61; optional&#40;object&#40;&#123;&#10;        dns_names       &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;        email_addresses &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;        ip_addresses    &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;        uris            &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;      &#125;&#41;, null&#41;&#10;      subordinate_config &#61; optional&#40;object&#40;&#123;&#10;        root_ca_id              &#61; optional&#40;string&#41;&#10;        pem_issuer_certificates &#61; optional&#40;list&#40;string&#41;&#41;&#10;      &#125;&#41;, null&#41;&#10;    &#125;&#41;&#41;&#10;    ca_pool_config &#61; object&#40;&#123;&#10;      ca_pool_id &#61; optional&#40;string, null&#41;&#10;      name       &#61; optional&#40;string, null&#41;&#10;      tier       &#61; optional&#40;string, &#34;DEVOPS&#34;&#41;&#10;    &#125;&#41;&#10;    location              &#61; string&#10;    iam                   &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;    iam_bindings          &#61; optional&#40;map&#40;any&#41;, &#123;&#125;&#41;&#10;    iam_bindings_additive &#61; optional&#40;map&#40;any&#41;, &#123;&#125;&#41;&#10;    iam_by_principals     &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;  &#125;&#41;&#41;, &#123;&#125;&#41;&#10;  prod &#61; optional&#40;map&#40;object&#40;&#123;&#10;    ca_configs &#61; map&#40;object&#40;&#123;&#10;      deletion_protection                    &#61; optional&#40;string, true&#41;&#10;      type                                   &#61; optional&#40;string, &#34;SELF_SIGNED&#34;&#41;&#10;      is_ca                                  &#61; optional&#40;bool, true&#41;&#10;      lifetime                               &#61; optional&#40;string, null&#41;&#10;      pem_ca_certificate                     &#61; optional&#40;string, null&#41;&#10;      ignore_active_certificates_on_deletion &#61; optional&#40;bool, false&#41;&#10;      skip_grace_period                      &#61; optional&#40;bool, true&#41;&#10;      labels                                 &#61; optional&#40;map&#40;string&#41;, null&#41;&#10;      gcs_bucket                             &#61; optional&#40;string, null&#41;&#10;      key_spec &#61; optional&#40;object&#40;&#123;&#10;        algorithm  &#61; optional&#40;string, &#34;RSA_PKCS1_2048_SHA256&#34;&#41;&#10;        kms_key_id &#61; optional&#40;string, null&#41;&#10;      &#125;&#41;, &#123;&#125;&#41;&#10;      key_usage &#61; optional&#40;object&#40;&#123;&#10;        cert_sign          &#61; optional&#40;bool, true&#41;&#10;        client_auth        &#61; optional&#40;bool, false&#41;&#10;        code_signing       &#61; optional&#40;bool, false&#41;&#10;        content_commitment &#61; optional&#40;bool, false&#41;&#10;        crl_sign           &#61; optional&#40;bool, true&#41;&#10;        data_encipherment  &#61; optional&#40;bool, false&#41;&#10;        decipher_only      &#61; optional&#40;bool, false&#41;&#10;        digital_signature  &#61; optional&#40;bool, false&#41;&#10;        email_protection   &#61; optional&#40;bool, false&#41;&#10;        encipher_only      &#61; optional&#40;bool, false&#41;&#10;        key_agreement      &#61; optional&#40;bool, false&#41;&#10;        key_encipherment   &#61; optional&#40;bool, true&#41;&#10;        ocsp_signing       &#61; optional&#40;bool, false&#41;&#10;        server_auth        &#61; optional&#40;bool, true&#41;&#10;        time_stamping      &#61; optional&#40;bool, false&#41;&#10;      &#125;&#41;, &#123;&#125;&#41;&#10;      subject &#61; optional&#40;object&#40;&#123;&#10;        common_name         &#61; string&#10;        organization        &#61; string&#10;        country_code        &#61; optional&#40;string&#41;&#10;        locality            &#61; optional&#40;string&#41;&#10;        organizational_unit &#61; optional&#40;string&#41;&#10;        postal_code         &#61; optional&#40;string&#41;&#10;        province            &#61; optional&#40;string&#41;&#10;        street_address      &#61; optional&#40;string&#41;&#10;        &#125;&#41;, &#123;&#10;        common_name  &#61; &#34;test.example.com&#34;&#10;        organization &#61; &#34;Test Example&#34;&#10;      &#125;&#41;&#10;      subject_alt_name &#61; optional&#40;object&#40;&#123;&#10;        dns_names       &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;        email_addresses &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;        ip_addresses    &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;        uris            &#61; optional&#40;list&#40;string&#41;, null&#41;&#10;      &#125;&#41;, null&#41;&#10;      subordinate_config &#61; optional&#40;object&#40;&#123;&#10;        root_ca_id              &#61; optional&#40;string&#41;&#10;        pem_issuer_certificates &#61; optional&#40;list&#40;string&#41;&#41;&#10;      &#125;&#41;, null&#41;&#10;    &#125;&#41;&#41;&#10;    ca_pool_config &#61; object&#40;&#123;&#10;      ca_pool_id &#61; optional&#40;string, null&#41;&#10;      name       &#61; optional&#40;string, null&#41;&#10;      tier       &#61; optional&#40;string, &#34;DEVOPS&#34;&#41;&#10;    &#125;&#41;&#10;    location &#61; string&#10;    iam      &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;    iam_bindings &#61; optional&#40;map&#40;object&#40;&#123;&#10;      members &#61; list&#40;string&#41;&#10;      role    &#61; string&#10;      condition &#61; optional&#40;object&#40;&#123;&#10;        expression  &#61; string&#10;        title       &#61; string&#10;        description &#61; optional&#40;string&#41;&#10;      &#125;&#41;&#41;&#10;    &#125;&#41;&#41;, &#123;&#125;&#41;&#10;    iam_bindings_additive &#61; optional&#40;map&#40;object&#40;&#123;&#10;      member &#61; string&#10;      role   &#61; string&#10;      condition &#61; optional&#40;object&#40;&#123;&#10;        expression  &#61; string&#10;        title       &#61; string&#10;        description &#61; optional&#40;string&#41;&#10;      &#125;&#41;&#41;&#10;    &#125;&#41;&#41;, &#123;&#125;&#41;&#10;    iam_by_principals &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;  &#125;&#41;&#41;, &#123;&#125;&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code title="&#123;&#10;  dev  &#61; &#123;&#125;&#10;  prod &#61; &#123;&#125;&#10;&#125;">&#123;&#8230;&#125;</code> |  |
+| [custom_roles](variables-fast.tf#L38) | Custom roles defined at the org level, in key => id format. | <code title="object&#40;&#123;&#10;  project_iam_viewer &#61; string&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code>null</code> | <code>0-bootstrap</code> |
+| [essential_contacts](variables.tf#L178) | Email used for essential contacts, unset if null. | <code>string</code> |  | <code>null</code> |  |
+| [kms_keys](variables.tf#L184) | KMS keys to create, keyed by name. | <code title="map&#40;object&#40;&#123;&#10;  rotation_period &#61; optional&#40;string, &#34;7776000s&#34;&#41;&#10;  labels          &#61; optional&#40;map&#40;string&#41;&#41;&#10;  locations &#61; optional&#40;list&#40;string&#41;, &#91;&#10;    &#34;europe&#34;, &#34;europe-west1&#34;, &#34;europe-west3&#34;, &#34;global&#34;&#10;  &#93;&#41;&#10;  purpose                       &#61; optional&#40;string, &#34;ENCRYPT_DECRYPT&#34;&#41;&#10;  skip_initial_version_creation &#61; optional&#40;bool, false&#41;&#10;  version_template &#61; optional&#40;object&#40;&#123;&#10;    algorithm        &#61; string&#10;    protection_level &#61; optional&#40;string, &#34;SOFTWARE&#34;&#41;&#10;  &#125;&#41;&#41;&#10;&#10;&#10;  iam &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;  iam_bindings &#61; optional&#40;map&#40;object&#40;&#123;&#10;    members &#61; list&#40;string&#41;&#10;    role    &#61; string&#10;    condition &#61; optional&#40;object&#40;&#123;&#10;      expression  &#61; string&#10;      title       &#61; string&#10;      description &#61; optional&#40;string&#41;&#10;    &#125;&#41;&#41;&#10;  &#125;&#41;&#41;, &#123;&#125;&#41;&#10;  iam_bindings_additive &#61; optional&#40;map&#40;object&#40;&#123;&#10;    member &#61; string&#10;    role   &#61; string&#10;    condition &#61; optional&#40;object&#40;&#123;&#10;      expression  &#61; string&#10;      title       &#61; string&#10;      description &#61; optional&#40;string&#41;&#10;    &#125;&#41;&#41;&#10;  &#125;&#41;&#41;, &#123;&#125;&#41;&#10;&#125;&#41;&#41;">map&#40;object&#40;&#123;&#8230;&#125;&#41;&#41;</code> |  | <code>&#123;&#125;</code> |  |
+| [ngfw_tls_configs](variables.tf#L223) | The CAS and trust configurations key names to be used for NGFW Enterprise. | <code title="object&#40;&#123;&#10;  keys &#61; optional&#40;object&#40;&#123;&#10;    dev &#61; optional&#40;object&#40;&#123;&#10;      cas           &#61; optional&#40;list&#40;string&#41;, &#91;&#34;ngfw-dev-cas-0&#34;&#93;&#41;&#10;      trust_configs &#61; optional&#40;list&#40;string&#41;, &#91;&#34;ngfw-dev-tc-0&#34;&#93;&#41;&#10;    &#125;&#41;, &#123;&#125;&#41;&#10;    prod &#61; optional&#40;object&#40;&#123;&#10;      cas           &#61; optional&#40;list&#40;string&#41;, &#91;&#34;ngfw-prod-cas-0&#34;&#93;&#41;&#10;      trust_configs &#61; optional&#40;list&#40;string&#41;, &#91;&#34;ngfw-prod-tc-0&#34;&#93;&#41;&#10;    &#125;&#41;, &#123;&#125;&#41;&#10;  &#125;&#41;, &#123;&#125;&#41;&#10;  tls_inspection &#61; optional&#40;object&#40;&#123;&#10;    enabled               &#61; optional&#40;bool, false&#41;&#10;    exclude_public_ca_set &#61; optional&#40;bool, false&#41;&#10;    min_tls_version       &#61; optional&#40;string, &#34;TLS_1_0&#34;&#41;&#10;  &#125;&#41;, &#123;&#125;&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code title="&#123;&#10;  dev  &#61; &#123;&#125;&#10;  prod &#61; &#123;&#125;&#10;&#125;">&#123;&#8230;&#125;</code> |  |
+| [outputs_location](variables.tf#L249) | Path where providers, tfvars files, and lists for the following stages are written. Leave empty to disable. | <code>string</code> |  | <code>null</code> |  |
+| [stage_config](variables-fast.tf#L84) | FAST stage configuration. | <code title="object&#40;&#123;&#10;  security &#61; optional&#40;object&#40;&#123;&#10;    short_name               &#61; optional&#40;string&#41;&#10;    iam_delegated_principals &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;    iam_viewer_principals    &#61; optional&#40;map&#40;list&#40;string&#41;&#41;, &#123;&#125;&#41;&#10;  &#125;&#41;, &#123;&#125;&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code>&#123;&#125;</code> | <code>1-resman</code> |
+| [tag_values](variables-fast.tf#L98) | Root-level tag values. | <code>map&#40;string&#41;</code> |  | <code>&#123;&#125;</code> | <code>1-resman</code> |
+| [trust_configs](variables.tf#L255) | The trust configs grouped by environment. | <code title="object&#40;&#123;&#10;  dev &#61; optional&#40;map&#40;object&#40;&#123;&#10;    description              &#61; optional&#40;string&#41;&#10;    location                 &#61; string&#10;    allowlisted_certificates &#61; optional&#40;map&#40;string&#41;, &#123;&#125;&#41;&#10;    trust_stores &#61; optional&#40;map&#40;object&#40;&#123;&#10;      intermediate_cas &#61; optional&#40;map&#40;string&#41;, &#123;&#125;&#41;&#10;      trust_anchors    &#61; optional&#40;map&#40;string&#41;, &#123;&#125;&#41;&#10;    &#125;&#41;&#41;, &#123;&#125;&#41;&#10;  &#125;&#41;&#41;&#41;&#10;  prod &#61; optional&#40;map&#40;object&#40;&#123;&#10;    description              &#61; optional&#40;string&#41;&#10;    location                 &#61; string&#10;    allowlisted_certificates &#61; optional&#40;map&#40;string&#41;, &#123;&#125;&#41;&#10;    trust_stores &#61; optional&#40;map&#40;object&#40;&#123;&#10;      intermediate_cas &#61; optional&#40;map&#40;string&#41;, &#123;&#125;&#41;&#10;      trust_anchors    &#61; optional&#40;map&#40;string&#41;, &#123;&#125;&#41;&#10;    &#125;&#41;&#41;, &#123;&#125;&#41;&#10;  &#125;&#41;&#41;&#41;&#10;&#125;&#41;">object&#40;&#123;&#8230;&#125;&#41;</code> |  | <code title="&#123;&#10;  dev  &#61; &#123;&#125;&#10;  prod &#61; &#123;&#125;&#10;&#125;">&#123;&#8230;&#125;</code> |  |
 
 ## Outputs
 
 | name | description | sensitive | consumers |
 |---|---|:---:|---|
-| [kms_keys](outputs.tf#L59) | KMS key ids. |  |  |
-| [stage_perimeter_projects](outputs.tf#L64) | Security project numbers. They can be added to perimeter resources. |  |  |
-| [tfvars](outputs.tf#L74) | Terraform variable files for the following stages. | ✓ |  |
-
+| [cas_configs](outputs.tf#L99) | Certificate Authority Service configurations. |  |  |
+| [kms_keys](outputs.tf#L104) | KMS key ids. |  |  |
+| [ngfw_tls_configs](outputs.tf#L109) | The NGFW Enterprise configurations. |  |  |
+| [tfvars](outputs.tf#L114) | Terraform variable files for the following stages. | ✓ |  |
+| [trust_config_ids](outputs.tf#L120) | Certificate Manager trust-config ids. |  |  |
 <!-- END TFDOC -->

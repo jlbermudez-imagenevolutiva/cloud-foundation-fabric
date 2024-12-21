@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# tfdoc:file:description Creates the VPC and manages the firewall rules and ILB.
+# tfdoc:file:description Creates the VPC and manages the firewall rules and LB.
 
 locals {
   internal_addresses = merge(
@@ -135,13 +135,17 @@ module "ip-addresses" {
 }
 
 module "listener-ilb" {
-  source        = "../../../modules/net-ilb"
+  source        = "../../../modules/net-lb-int"
   for_each      = toset(var.always_on_groups)
   project_id    = var.project_id
   region        = var.region
   name          = "${var.prefix}-${each.value}-ilb"
   service_label = "${var.prefix}-${each.value}-ilb"
-  address       = local.internal_address_ips["${var.prefix}-lb-${each.value}"]
+  forwarding_rules_config = {
+    "" = {
+      address = local.internal_address_ips["${var.prefix}-lb-${each.value}"]
+    }
+  }
   vpc_config = {
     network    = local.network
     subnetwork = local.subnetwork

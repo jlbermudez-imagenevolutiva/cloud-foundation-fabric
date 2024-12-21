@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,11 +17,17 @@ module "db" {
   project_id          = module.project.project_id
   availability_type   = var.sql_configuration.availability_type
   encryption_key_name = var.service_encryption_keys != null ? try(var.service_encryption_keys[var.regions.primary], null) : null
-  network             = local.vpc_self_link
-  name                = "${var.prefix}-db"
-  region              = var.regions.primary
-  database_version    = var.sql_configuration.database_version
-  tier                = var.sql_configuration.tier
+  network_config = {
+    connectivity = {
+      psa_configs = [{
+        private_network = local.vpc_self_link
+      }]
+    }
+  }
+  name             = "${var.prefix}-db"
+  region           = var.regions.primary
+  database_version = var.sql_configuration.database_version
+  tier             = var.sql_configuration.tier
   flags = {
     "cloudsql.iam_authentication" = "on"
   }
@@ -34,12 +40,14 @@ module "db" {
   }
   databases = [var.postgres_database]
   users = {
-    postgres = var.postgres_user_password
+    postgres = {
+      password = var.postgres_user_password
+    }
   }
 }
 
 resource "google_sql_user" "users" {
-  for_each = toset(var.data_eng_principals)
+  for_each = toset(var.sql_users)
   project  = module.project.project_id
   name     = each.value
   instance = module.db.name
@@ -47,8 +55,7 @@ resource "google_sql_user" "users" {
 }
 
 resource "google_sql_user" "service-account" {
-  for_each = toset(var.data_eng_principals)
-  project  = module.project.project_id
+  project = module.project.project_id
   # Omit the .gserviceaccount.com suffix in the email
   name     = regex("(.+)(.gserviceaccount)", module.service-account-sql.email)[0]
   instance = module.db.name

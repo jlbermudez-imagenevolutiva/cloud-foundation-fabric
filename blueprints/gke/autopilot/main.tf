@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,8 +58,8 @@ module "docker_artifact_registry" {
   source     = "../../../modules/artifact-registry"
   project_id = module.project.project_id
   location   = var.region
-  format     = "DOCKER"
-  id         = "registry"
+  name       = "registry"
+  format     = { docker = { standard = {} } }
   iam = {
     "roles/artifactregistry.reader" = [module.node_sa.iam_email]
   }

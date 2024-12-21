@@ -51,6 +51,16 @@ variable "access_levels" {
     ])
     error_message = "Invalid `combining_function` value (null, \"AND\", \"OR\" accepted)."
   }
+  validation {
+    condition = alltrue([
+      for k, v in var.access_levels : alltrue([
+        for condition in v.conditions : alltrue([
+          for member in condition.members : can(regex("^(?:serviceAccount:|user:)", member))
+        ])
+      ])
+    ])
+    error_message = "Invalid `conditions[].members`. It needs to start with on of the prefixes: 'serviceAccount:' or 'user:'."
+  }
 }
 
 variable "access_policy" {
@@ -72,13 +82,14 @@ variable "egress_policies" {
   description = "Egress policy definitions that can be referenced in perimeters."
   type = map(object({
     from = object({
-      identity_type = optional(string, "ANY_IDENTITY")
+      identity_type = optional(string)
       identities    = optional(list(string))
     })
     to = object({
       operations = optional(list(object({
-        method_selectors = optional(list(string))
-        service_name     = string
+        method_selectors     = optional(list(string))
+        permission_selectors = optional(list(string))
+        service_name         = string
       })), [])
       resources              = optional(list(string))
       resource_type_external = optional(bool, false)
@@ -88,13 +99,70 @@ variable "egress_policies" {
   nullable = false
   validation {
     condition = alltrue([
-      for k, v in var.egress_policies : contains([
+      for k, v in var.egress_policies :
+      v.from.identity_type == null ? true : contains([
         "IDENTITY_TYPE_UNSPECIFIED", "ANY_IDENTITY",
-        "ANY_USER", "ANY_SERVICE_ACCOUNT", ""
+        "ANY_USER_ACCOUNT", "ANY_SERVICE_ACCOUNT", ""
       ], v.from.identity_type)
     ])
     error_message = "Invalid `from.identity_type` value in egress policy."
   }
+  validation {
+    condition = alltrue([
+      for k, v in var.egress_policies : v.from.identities == null ? true : alltrue([
+        for identity in v.from.identities : can(regex("^(?:serviceAccount:|user:|group:|principal:)", identity))
+      ])
+    ])
+    error_message = "Invalid `from.identity`. It needs to start with on of the prefixes: 'serviceAccount:', 'user:', 'group:' or 'principal:'."
+  }
+}
+
+variable "factories_config" {
+  description = "Paths to folders that enable factory functionality."
+  type = object({
+    access_levels       = optional(string)
+    egress_policies     = optional(string)
+    ingress_policies    = optional(string)
+    restricted_services = optional(string, "data/restricted-services.yaml")
+  })
+  nullable = false
+  default  = {}
+}
+
+variable "iam" {
+  description = "IAM bindings in {ROLE => [MEMBERS]} format."
+  type        = map(list(string))
+  default     = {}
+}
+
+variable "iam_bindings" {
+  description = "Authoritative IAM bindings in {KEY => {role = ROLE, members = [], condition = {}}}. Keys are arbitrary."
+  type = map(object({
+    members = list(string)
+    role    = string
+    condition = optional(object({
+      expression  = string
+      title       = string
+      description = optional(string)
+    }))
+  }))
+  nullable = false
+  default  = {}
+}
+
+variable "iam_bindings_additive" {
+  description = "Individual additive IAM bindings. Keys are arbitrary."
+  type = map(object({
+    member = string
+    role   = string
+    condition = optional(object({
+      expression  = string
+      title       = string
+      description = optional(string)
+    }))
+  }))
+  nullable = false
+  default  = {}
 }
 
 variable "ingress_policies" {
@@ -108,8 +176,9 @@ variable "ingress_policies" {
     })
     to = object({
       operations = optional(list(object({
-        method_selectors = optional(list(string))
-        service_name     = string
+        method_selectors     = optional(list(string))
+        permission_selectors = optional(list(string))
+        service_name         = string
       })), [])
       resources = optional(list(string))
     })
@@ -119,12 +188,20 @@ variable "ingress_policies" {
   validation {
     condition = alltrue([
       for k, v in var.ingress_policies :
-      v.from.identity_type == null || contains([
+      v.from.identity_type == null ? true : contains([
         "IDENTITY_TYPE_UNSPECIFIED", "ANY_IDENTITY",
-        "ANY_USER", "ANY_SERVICE_ACCOUNT"
-      ], coalesce(v.from.identity_type, "-"))
+        "ANY_USER_ACCOUNT", "ANY_SERVICE_ACCOUNT", ""
+      ], v.from.identity_type)
     ])
-    error_message = "Invalid `from.identity_type` value in eress policy."
+    error_message = "Invalid `from.identity_type` value in ingress policy."
+  }
+  validation {
+    condition = alltrue([
+      for k, v in var.ingress_policies : v.from.identities == null ? true : alltrue([
+        for identity in v.from.identities : can(regex("^(?:serviceAccount:|user:|group:|principal:)", identity))
+      ])
+    ])
+    error_message = "Invalid `from.identity`. It needs to start with on of the prefixes: 'serviceAccount:', 'user:', 'group:' or 'principal:'."
   }
 }
 
@@ -141,6 +218,7 @@ variable "service_perimeters_bridge" {
 variable "service_perimeters_regular" {
   description = "Regular service perimeters."
   type = map(object({
+    description = optional(string)
     spec = optional(object({
       access_levels       = optional(list(string))
       resources           = optional(list(string))
@@ -149,7 +227,7 @@ variable "service_perimeters_regular" {
       ingress_policies    = optional(list(string))
       vpc_accessible_services = optional(object({
         allowed_services   = list(string)
-        enable_restriction = bool
+        enable_restriction = optional(bool, true)
       }))
     }))
     status = optional(object({

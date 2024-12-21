@@ -1,4 +1,4 @@
-# Copyright 2023 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,18 +16,17 @@
 #                                   Project                                   #
 ###############################################################################
 locals {
-  service_encryption_keys = var.service_encryption_keys
-  shared_vpc_project      = try(var.network_config.host_project, null)
+  shared_vpc_project = try(var.network_config.host_project, null)
 
   subnet = (
     local.use_shared_vpc
     ? var.network_config.subnet_self_link
-    : values(module.vpc.0.subnet_self_links)[0]
+    : values(module.vpc[0].subnet_self_links)[0]
   )
   vpc = (
     local.use_shared_vpc
     ? var.network_config.network_self_link
-    : module.vpc.0.self_link
+    : module.vpc[0].self_link
   )
   use_shared_vpc = var.network_config != null
 
@@ -38,8 +37,8 @@ locals {
   }
 
   shared_vpc_role_members = {
-    robot-df  = "serviceAccount:${module.project.service_accounts.robots.dataflow}"
-    notebooks = "serviceAccount:${module.project.service_accounts.robots.notebooks}"
+    robot-df  = module.project.service_agents.dataflow.iam_email
+    notebooks = module.project.service_agents.notebooks.iam_email
   }
 
   # reassemble in a format suitable for for_each
@@ -89,9 +88,9 @@ module "project" {
     # Example of applying a project wide policy, mainly useful for Composer 1
   }
   service_encryption_key_ids = {
-    compute = [try(local.service_encryption_keys.compute, null)]
-    bq      = [try(local.service_encryption_keys.bq, null)]
-    storage = [try(local.service_encryption_keys.storage, null)]
+    "compute.googleapis.com"  = compact([var.service_encryption_keys.compute])
+    "bigquery.googleapis.com" = compact([var.service_encryption_keys.bq])
+    "storage.googleapis.com"  = compact([var.service_encryption_keys.storage])
   }
   service_config = {
     disable_on_destroy = false, disable_dependent_services = false
@@ -120,7 +119,7 @@ module "vpc-firewall" {
   source     = "../../../modules/net-vpc-firewall"
   count      = local.use_shared_vpc ? 0 : 1
   project_id = module.project.project_id
-  network    = module.vpc.0.name
+  network    = module.vpc[0].name
   default_rules_config = {
     admin_ranges = ["10.0.0.0/20"]
   }
@@ -141,14 +140,14 @@ module "cloudnat" {
   project_id     = module.project.project_id
   name           = "${var.prefix}-default"
   region         = var.region
-  router_network = module.vpc.0.name
+  router_network = module.vpc[0].name
 }
 
 resource "google_project_iam_member" "shared_vpc" {
   count   = local.use_shared_vpc ? 1 : 0
   project = var.network_config.host_project
   role    = "roles/compute.networkUser"
-  member  = "serviceAccount:${module.project.service_accounts.robots.notebooks}"
+  member  = module.project.service_agents.notebooks.iam_email
 }
 
 
@@ -162,14 +161,15 @@ module "bucket" {
   prefix         = var.prefix
   location       = var.location
   name           = "data"
-  encryption_key = try(local.service_encryption_keys.storage, null) # Example assignment of an encryption key
+  encryption_key = var.service_encryption_keys.storage
+  force_destroy  = !var.deletion_protection
 }
 
 module "dataset" {
   source         = "../../../modules/bigquery-dataset"
   project_id     = module.project.project_id
   id             = "${replace(var.prefix, "-", "_")}_data"
-  encryption_key = try(local.service_encryption_keys.bq, null) # Example assignment of an encryption key
+  encryption_key = var.service_encryption_keys.bq
 }
 
 ###############################################################################
@@ -206,8 +206,8 @@ resource "google_notebooks_instance" "playground" {
   install_gpu_driver = true
   boot_disk_type     = "PD_SSD"
   boot_disk_size_gb  = 110
-  disk_encryption    = try(local.service_encryption_keys.compute != null, false) ? "CMEK" : null
-  kms_key            = try(local.service_encryption_keys.compute, null)
+  disk_encryption    = var.service_encryption_keys.compute != null ? "CMEK" : null
+  kms_key            = var.service_encryption_keys.compute
 
   no_public_ip    = true
   no_proxy_access = false

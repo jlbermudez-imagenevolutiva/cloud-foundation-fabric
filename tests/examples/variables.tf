@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@ variable "billing_account_id" {
   default = "123456-123456-123456"
 }
 
-variable "kms_key" {
-  default = {
-    self_link = "kms_key_self_link"
-  }
+variable "ca_pool_id" {
+  default = "ca-pool-id"
+}
+
+variable "group_email" {
+  default = "organization-admins@example.org"
 }
 
 variable "organization_id" {
@@ -44,15 +46,26 @@ variable "project_id" {
   default = "project-id"
 }
 
+variable "project_number" {
+  default = "123"
+}
+
 variable "region" {
-  default = "region"
+  default = "europe-west8"
+}
+
+variable "regions" {
+  default = {
+    primary   = "europe-west8"
+    secondary = "europe-west9"
+  }
 }
 
 variable "service_account" {
   default = {
     id        = "service_account_id"
-    email     = "service_account_email"
-    iam_email = "service_account_iam_email"
+    email     = "sa1@sa.example"
+    iam_email = "serviceAccount:sa1@sa.example"
   }
 }
 
@@ -65,23 +78,77 @@ variable "subnet" {
   }
 }
 
+variable "subnets" {
+  default = {
+    primary = {
+      name      = "primary"
+      region    = "europe-west8"
+      cidr      = "10.0.16.0/24"
+      self_link = "https://www.googleapis.com/compute/v1/projects/my-project/regions/europe-west8/subnetworks/primary"
+    }
+    secondary = {
+      name      = "secondary"
+      region    = "europe-west89"
+      cidr      = "10.0.16.0/24"
+      self_link = "https://www.googleapis.com/compute/v1/projects/my-project/regions/europe-west9/subnetworks/secondary"
+    }
+  }
+}
+
+variable "subnet_psc_1" {
+  default = {
+    name      = "subnet_name"
+    region    = "subnet_region"
+    cidr      = "subnet_cidr"
+    self_link = "https://www.googleapis.com/compute/v1/projects/my-project/regions/europe-west8/subnetworks/subnet"
+  }
+}
+
+variable "subnet_psc_2" {
+  default = {
+    name      = "subnet_name"
+    region    = "subnet_region"
+    cidr      = "subnet_cidr"
+    self_link = "subnet_self_link"
+  }
+}
+
+variable "subnet1" {
+  default = {
+    name      = "subnet_name"
+    region    = "subnet_region"
+    cidr      = "subnet_cidr"
+    self_link = "subnet_self_link"
+  }
+}
+
+variable "subnet2" {
+  default = {
+    name      = "subnet_name"
+    region    = "subnet_region"
+    cidr      = "subnet_cidr"
+    self_link = "subnet_self_link"
+  }
+}
+
 variable "vpc" {
   default = {
-    name      = "vpc_name"
+    name      = "vpc-name"
     self_link = "projects/xxx/global/networks/aaa"
+    id        = "projects/xxx/global/networks/aaa"
   }
 }
 
 variable "vpc1" {
   default = {
-    name      = "vpc_name"
+    name      = "vpc-name"
     self_link = "projects/xxx/global/networks/bbb"
   }
 }
 
 variable "vpc2" {
   default = {
-    name      = "vpc2_name"
+    name      = "vpc2-name"
     self_link = "projects/xxx/global/networks/ccc"
   }
 }

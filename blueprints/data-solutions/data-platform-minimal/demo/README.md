@@ -47,12 +47,12 @@ Below you can find computed commands to perform steps.
 ```bash
 terraform output -json | jq -r '@sh "export LND_SA=\(.service_accounts.value.landing)\nexport PRC_SA=\(.service_accounts.value.processing)\nexport CMP_SA=\(.service_accounts.value.composer)"' > env.sh
 
-terraform output -json | jq -r '@sh "export LND_GCS=\(.gcs_buckets.value.landing_cs_0)\nexport PRC_GCS=\(.gcs_buckets.value.processing_cs_0)\nexport CMP_GCS=\(.gcs_buckets.value.composer)"' >> env.sh
+terraform output -json | jq -r '@sh "export LND_GCS=\(.gcs_buckets.value.landing)\nexport PRC_GCS=\(.gcs_buckets.value.processing)\nexport CUR_GCS=\(.gcs_buckets.value.curated)\nexport CMP_GCS=\(.composer.value.dag_bucket)"' >> env.sh
 
 source ./env.sh
 
 gsutil -i $LND_SA cp demo/data/*.csv gs://$LND_GCS
 gsutil -i $CMP_SA cp demo/data/*.j* gs://$PRC_GCS
 gsutil -i $CMP_SA cp demo/pyspark_* gs://$PRC_GCS
-gsutil -i $CMP_SA cp demo/dag_*.py $CMP_GCS
+gsutil -i $CMP_SA cp demo/dag_*.py gs://$CMP_GCS/dags
 ```

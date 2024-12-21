@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,9 +36,9 @@ module "project" {
     "pubsub.googleapis.com"
   ]
   iam = {
-    "roles/resourcemanager.projectIamAdmin" = ["serviceAccount:${module.project.service_accounts.robots.cloudasset}"]
-    "roles/bigquery.dataEditor"             = ["serviceAccount:${module.project.service_accounts.robots.cloudasset}"]
-    "roles/bigquery.user"                   = ["serviceAccount:${module.project.service_accounts.robots.cloudasset}"]
+    "roles/resourcemanager.projectIamAdmin" = [module.project.service_agents.cloudasset.iam_email]
+    "roles/bigquery.dataEditor"             = [module.project.service_agents.cloudasset.iam_email]
+    "roles/bigquery.user"                   = [module.project.service_agents.cloudasset.iam_email]
   }
 }
 
@@ -63,7 +63,7 @@ module "pubsub" {
   project_id = module.project.project_id
   name       = var.name
   subscriptions = {
-    "${var.name}-default" = null
+    "${var.name}-default" = {}
   }
   # the Cloud Scheduler robot service account already has pubsub.topics.publish
   # at the project level via roles/cloudscheduler.serviceAgent
@@ -74,7 +74,7 @@ module "pubsub_file" {
   project_id = module.project.project_id
   name       = var.name_cffile
   subscriptions = {
-    "${var.name_cffile}-default" = null
+    "${var.name_cffile}-default" = {}
   }
   # the Cloud Scheduler robot service account already has pubsub.topics.publish
   # at the project level via roles/cloudscheduler.serviceAgent
@@ -94,8 +94,10 @@ module "cf" {
     location = var.region
   }
   bundle_config = {
-    source_dir  = "${path.module}/cf"
-    output_path = var.bundle_path
+    path = "${path.module}/cf"
+    folder_options = {
+      archive_path = var.bundle_path
+    }
   }
   service_account = module.service-account.email
   trigger_config = {
@@ -116,9 +118,10 @@ module "cffile" {
     lifecycle_delete_age_days = null
   }
   bundle_config = {
-    source_dir  = "${path.module}/cffile"
-    output_path = var.bundle_path_cffile
-    excludes    = null
+    path = "${path.module}/cffile"
+    folder_options = {
+      archive_path = var.bundle_path_cffile
+    }
   }
   service_account = module.service-account.email
   trigger_config = {

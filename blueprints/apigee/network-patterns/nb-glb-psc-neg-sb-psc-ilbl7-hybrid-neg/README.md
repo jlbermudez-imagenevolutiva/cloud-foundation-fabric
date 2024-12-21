@@ -1,4 +1,4 @@
-# Apigee X - Northbound GLB with PSC Neg, Southbouth PSC with ILB (L7) and Hybrid NEG
+# Apigee X - Northbound: External Application LB with PSC Neg, Southbouth: PSC with Internal Application LB and Hybrid NEG
 
 The following blueprint shows how to expose an on-prem target backend to clients in the Internet.
 
@@ -79,5 +79,5 @@ module "test" {
   onprem_project_id  = "my-onprem-project"
   hostname           = "test.myorg.org"
 }
-# tftest modules=14 resources=77
+# tftest modules=14 resources=84
 ```

@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2023 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,17 +21,25 @@ output "endpoint_attachment_hosts" {
 
 output "envgroups" {
   description = "Environment groups."
-  value       = try(google_apigee_envgroup.envgroups, null)
+  value       = google_apigee_envgroup.envgroups
 }
 
 output "environments" {
   description = "Environment."
-  value       = try(google_apigee_environment.environments, null)
+  value       = google_apigee_environment.environments
 }
 
 output "instances" {
   description = "Instances."
-  value       = try(google_apigee_instance.instances, null)
+  value       = google_apigee_instance.instances
+}
+
+output "nat_ips" {
+  description = "NAT IP addresses used in instances."
+  value = {
+    for k, v in google_apigee_nat_address.apigee_nat :
+    k => v.ip_address
+  }
 }
 
 output "org_id" {

@@ -1,5 +1,5 @@
 /**
- * Copyright 2022 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
     "google.subject"       = "assertion.sub"
     "attribute.repository" = "assertion.repository"
   }
+  attribute_condition = var.identity_pool_assertions
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
@@ -40,10 +41,10 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
 
 module "artifact_registry" {
   source     = "../../../modules/artifact-registry"
-  id         = "docker-repo"
+  name       = "docker-repo"
   project_id = module.project.project_id
   location   = var.region
-  format     = "DOCKER"
+  format     = { docker = { standard = {} } }
 }
 
 module "service-account-github" {
@@ -58,15 +59,17 @@ module "secret-manager" {
   project_id = module.project.project_id
   source     = "../../../modules/secret-manager"
   secrets = {
-    github-key = [var.region]
-  }
-  encryption_key = {
-    "${var.region}" = var.service_encryption_keys.secretmanager
+    github-key = {
+      locations = [var.region]
+      keys = {
+        "${var.region}" = var.service_encryption_keys.secretmanager
+      }
+    }
   }
   iam = {
     github-key = {
       "roles/secretmanager.secretAccessor" = [
-        "serviceAccount:${module.project.service_accounts.robots.cloudbuild}",
+        module.project.service_agents.cloudbuild.iam_email,
         module.service-account-mlops.iam_email
       ]
     }

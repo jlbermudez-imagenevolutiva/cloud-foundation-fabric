@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,13 @@ variable "billing_account" {
   default     = null
 }
 
+variable "compute_metadata" {
+  description = "Optional compute metadata key/values. Only usable if compute API has been enabled."
+  type        = map(string)
+  nullable    = false
+  default     = {}
+}
+
 variable "contacts" {
   description = "List of essential contacts for this resource. Must be in the form EMAIL -> [NOTIFICATION_TYPES]. Valid notification types are ALL, SUSPENSION, SECURITY, TECHNICAL, BILLING, LEGAL, PRODUCT_UPDATES."
   type        = map(list(string))
@@ -44,6 +51,25 @@ variable "default_service_account" {
   description = "Project default service account setting: can be one of `delete`, `deprivilege`, `disable`, or `keep`."
   default     = "keep"
   type        = string
+  validation {
+    condition = (
+      var.default_service_account == null ||
+      contains(["delete", "deprivilege", "disable", "keep"], var.default_service_account)
+    )
+    error_message = "Only `delete`, `deprivilege`, `disable`, or `keep` are supported."
+  }
+}
+
+
+variable "deletion_policy" {
+  description = "Deletion policy setting for this project."
+  default     = "DELETE"
+  type        = string
+  nullable    = false
+  validation {
+    condition     = contains(["ABANDON", "DELETE", "PREVENT"], var.deletion_policy)
+    error_message = "deletion_policy must be one of 'ABANDON', 'DELETE', 'PREVENT'."
+  }
 }
 
 variable "descriptive_name" {
@@ -52,31 +78,15 @@ variable "descriptive_name" {
   default     = null
 }
 
-variable "group_iam" {
-  description = "Authoritative IAM binding for organization groups, in {GROUP_EMAIL => [ROLES]} format. Group emails need to be static. Can be used in combination with the `iam` variable."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
-variable "iam" {
-  description = "IAM bindings in {ROLE => [MEMBERS]} format."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
-variable "iam_additive" {
-  description = "IAM additive bindings in {ROLE => [MEMBERS]} format."
-  type        = map(list(string))
-  default     = {}
-  nullable    = false
-}
-
-variable "iam_additive_members" {
-  description = "IAM additive bindings in {MEMBERS => [ROLE]} format. This might break if members are dynamic values."
-  type        = map(list(string))
-  default     = {}
+variable "factories_config" {
+  description = "Paths to data files and folders that enable factory functionality."
+  type = object({
+    custom_roles = optional(string)
+    org_policies = optional(string)
+    quotas       = optional(string)
+  })
+  nullable = false
+  default  = {}
 }
 
 variable "labels" {
@@ -89,52 +99,7 @@ variable "labels" {
 variable "lien_reason" {
   description = "If non-empty, creates a project lien with this description."
   type        = string
-  default     = ""
-}
-
-variable "logging_exclusions" {
-  description = "Logging exclusions for this project in the form {NAME -> FILTER}."
-  type        = map(string)
-  default     = {}
-  nullable    = false
-}
-
-variable "logging_sinks" {
-  description = "Logging sinks to create for this project."
-  type = map(object({
-    bq_partitioned_table = optional(bool)
-    description          = optional(string)
-    destination          = string
-    disabled             = optional(bool, false)
-    exclusions           = optional(map(string), {})
-    filter               = string
-    iam                  = optional(bool, true)
-    type                 = string
-    unique_writer        = optional(bool)
-  }))
-  default  = {}
-  nullable = false
-  validation {
-    condition = alltrue([
-      for k, v in var.logging_sinks :
-      contains(["bigquery", "logging", "pubsub", "storage"], v.type)
-    ])
-    error_message = "Type must be one of 'bigquery', 'logging', 'pubsub', 'storage'."
-  }
-  validation {
-    condition = alltrue([
-      for k, v in var.logging_sinks :
-      v.bq_partitioned_table != true || v.type == "bigquery"
-    ])
-    error_message = "Can only set bq_partitioned_table when type is `bigquery`."
-  }
-}
-
-variable "metric_scopes" {
-  description = "List of projects that will act as metric scopes for this project."
-  type        = list(string)
-  default     = []
-  nullable    = false
+  default     = null
 }
 
 variable "name" {
@@ -169,33 +134,6 @@ variable "org_policies" {
   nullable = false
 }
 
-variable "org_policies_data_path" {
-  description = "Path containing org policies in YAML format."
-  type        = string
-  default     = null
-}
-
-variable "oslogin" {
-  description = "Enable OS Login."
-  type        = bool
-  default     = false
-}
-
-variable "oslogin_admins" {
-  description = "List of IAM-style identities that will be granted roles necessary for OS Login administrators."
-  type        = list(string)
-  default     = []
-  nullable    = false
-
-}
-
-variable "oslogin_users" {
-  description = "List of IAM-style identities that will be granted roles necessary for OS Login users."
-  type        = list(string)
-  default     = []
-  nullable    = false
-}
-
 variable "parent" {
   description = "Parent folder or organization in 'folders/folder_id' or 'organizations/org_id' format."
   type        = string
@@ -222,6 +160,17 @@ variable "project_create" {
   default     = true
 }
 
+variable "service_agents_config" {
+  description = "Automatic service agent configuration options."
+  type = object({
+    create_primary_agents = optional(bool, true)
+    grant_default_roles   = optional(bool, true)
+    services_enabled      = optional(list(string), [])
+  })
+  default  = {}
+  nullable = false
+}
+
 variable "service_config" {
   description = "Configure service API activation."
   type = object({
@@ -235,23 +184,10 @@ variable "service_config" {
 }
 
 variable "service_encryption_key_ids" {
-  description = "Cloud KMS encryption key in {SERVICE => [KEY_URL]} format."
+  description = "Service Agents to be granted encryption/decryption permissions over Cloud KMS encryption keys. Format {SERVICE_AGENT => [KEY_ID]}."
   type        = map(list(string))
   default     = {}
-}
-
-# accessPolicies/ACCESS_POLICY_NAME/servicePerimeters/PERIMETER_NAME
-variable "service_perimeter_bridges" {
-  description = "Name of VPC-SC Bridge perimeters to add project into. See comment in the variables file for format."
-  type        = list(string)
-  default     = null
-}
-
-# accessPolicies/ACCESS_POLICY_NAME/servicePerimeters/PERIMETER_NAME
-variable "service_perimeter_standard" {
-  description = "Name of VPC-SC Standard perimeter to add project into. See comment in the variables file for format."
-  type        = string
-  default     = null
+  nullable    = false
 }
 
 variable "services" {
@@ -271,22 +207,50 @@ variable "shared_vpc_host_config" {
 
 variable "shared_vpc_service_config" {
   description = "Configures this project as a Shared VPC service project (mutually exclusive with shared_vpc_host_config)."
-  # the list of valid service identities is in service-accounts.tf
+  # the list of valid service identities is in service-agents.yaml
   type = object({
-    host_project         = string
-    service_identity_iam = optional(map(list(string)))
+    host_project             = string
+    network_users            = optional(list(string), [])
+    service_agent_iam        = optional(map(list(string)), {})
+    service_agent_subnet_iam = optional(map(list(string)), {})
+    service_iam_grants       = optional(list(string), [])
+    network_subnet_users     = optional(map(list(string)), {})
   })
-  default = null
+  default = {
+    host_project = null
+  }
+  nullable = false
+  validation {
+    condition = var.shared_vpc_service_config.host_project != null || (
+      var.shared_vpc_service_config.host_project == null &&
+      length(var.shared_vpc_service_config.network_users) == 0 &&
+      length(var.shared_vpc_service_config.service_iam_grants) == 0 &&
+      length(var.shared_vpc_service_config.service_agent_iam) == 0 &&
+      length(var.shared_vpc_service_config.service_agent_subnet_iam) == 0 &&
+      length(var.shared_vpc_service_config.network_subnet_users) == 0
+    )
+    error_message = "You need to provide host_project when providing Shared VPC host and subnet IAM permissions."
+  }
 }
 
 variable "skip_delete" {
-  description = "Allows the underlying resources to be destroyed without destroying the project itself."
+  description = "Deprecated. Use deletion_policy."
   type        = bool
-  default     = false
+  default     = null
+  # Validation fails on existing infrastructure. Implemented as a
+  # precondition in main.tf
+  # validation {
+  #   condition     = var.skip_delete != null
+  #   error_message = "skip_delete is deprecated. Use deletion_policy."
+  # }
 }
 
-variable "tag_bindings" {
-  description = "Tag bindings for this project, in key => tag value id format."
-  type        = map(string)
-  default     = null
+variable "vpc_sc" {
+  description = "VPC-SC configuration for the project, use when `ignore_changes` for resources is set in the VPC-SC module."
+  type = object({
+    perimeter_name    = string
+    perimeter_bridges = optional(list(string), [])
+    is_dry_run        = optional(bool, false)
+  })
+  default = null
 }
